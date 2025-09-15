@@ -477,7 +477,11 @@ class BaseTrainer(ABC):
         metrics_tracker = MetricsTracker()
 
         for batch_idx, batch in enumerate(self.data_module.train_dl):
-            if batch_idx % 10 == 0:
+            # Optional: sync ScheduledFloat batch_count to global_step if enabled by config
+            if (
+                getattr(self.cfg.trainer, "set_batch_count", False)
+                and batch_idx % 10 == 0
+            ):
                 self._maybe_update_batch_count()
             if self.cfg.data.use_infinite_dataset:
                 batch_idx = self.global_step
@@ -624,29 +628,20 @@ class BaseTrainer(ABC):
 
     def _maybe_update_batch_count(self):
         """
-        Optionally update the ZipformerEncoderModel batch_count.
+        Optionally update modules' `batch_count` to the current global_step.
 
-        This is typically used by models with schedule-float–based behaviors.
-        Updates the batch_count attribute for modules that have it, which is used
-        for dynamic scheduling behaviors in certain model architectures.
-
-        Note:
-            This method is called periodically during training (every 10 batches)
-            to keep the model's internal batch counter synchronized with the global step.
+        This is used by architectures that rely on a global step counter to evaluate
+        ScheduledFloat values in training. It is gated by `trainer.set_batch_count` and
+        called periodically in the training loop.
         """
         model = (
             self.model.module
             if isinstance(self.model, torch.nn.parallel.DistributedDataParallel)
             else self.model
         )
-        batch_count = self.global_step
-
         for m in model.modules():
             if hasattr(m, "batch_count"):
-                if not m.batch_count:
-                    m.batch_count = batch_count
-                else:
-                    m.batch_count += batch_count
+                m.batch_count = self.global_step
 
     def _forward_backward_optimize(self, batch):
         """

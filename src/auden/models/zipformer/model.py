@@ -30,7 +30,6 @@ class ZipformerEncoderModel(nn.Module):
         map_location="cpu",
         dtype=None,
         device=None,
-        batch_count: int | None = 100000,
     ):
         """Load a Zipformer encoder (or extract it from a composite model).
 
@@ -43,7 +42,6 @@ class ZipformerEncoderModel(nn.Module):
             map_location: Passed to ``torch.load``.
             dtype: Optional dtype to move the model to after loading.
             device: Optional device to move the model to after loading.
-            batch_count: If not None, sets ``batch_count`` for modules that have it.
         """
         # Resolve model_dir and weight file
         if os.path.isdir(model_path):
@@ -125,10 +123,6 @@ class ZipformerEncoderModel(nn.Module):
             model = model.to(dtype=dtype)
         if device is not None:
             model = model.to(device)
-        if batch_count is not None:
-            for m in model.modules():
-                if hasattr(m, "batch_count"):
-                    m.batch_count = batch_count  # this value can make sure all scheduledfloat is saturated
         model.eval()
         return model
 
