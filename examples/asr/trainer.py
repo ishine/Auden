@@ -1,6 +1,3 @@
-import logging
-import warnings
-
 import torch
 
 from auden.trainer.ddp_trainer import BaseTrainer
@@ -89,34 +86,11 @@ class AsrTrainer(BaseTrainer):
 
         return loss, info
 
-    def validate(self, epoch):
-        """Run the validation process."""
-        self.model.eval()
-        with torch.no_grad():
-            for valid_name, valid_dl in zip(
-                self.data_module.valid_names, self.data_module.valid_dls
-            ):
-                tot_info = MetricsTracker()
-                for batch_idx, batch in enumerate(valid_dl):
-                    loss, info = self._forward_one_batch(
-                        batch=batch,
-                        is_training=False,
-                    )
+    def validate(self, epoch: int):
+        """
+        Validation is provided by BaseTrainer.
 
-                    assert loss.requires_grad is False
-                    tot_info.update(info)
-
-                if self.world_size > 1:
-                    tot_info.reduce(loss.device)
-
-                if self.rank == 0:
-                    logging.info(
-                        f"Epoch {epoch}, global batch {self.global_step}, validation: {tot_info}"
-                    )
-                    if self.tb_writer is not None:
-                        tot_info.write_summary(
-                            self.tb_writer,
-                            f"train/valid_{valid_name}_",
-                            self.global_step,
-                        )
-        self.model.train()
+        Override in a subclass if you need ASR-specific validation logic
+        (e.g., decoding to compute WER/CER, beam search, or task-specific metrics).
+        """
+        return super().validate(epoch)
