@@ -477,11 +477,8 @@ class BaseTrainer(ABC):
         metrics_tracker = MetricsTracker()
 
         for batch_idx, batch in enumerate(self.data_module.train_dl):
-            # Optional: sync ScheduledFloat batch_count to global_step if enabled by config
-            if (
-                getattr(self.cfg.trainer, "set_batch_count", False)
-                and batch_idx % 10 == 0
-            ):
+            # Optional: sync ScheduledFloat batch_count to global_step
+            if batch_idx % 10 == 0:
                 self._maybe_update_batch_count()
             if self.cfg.data.use_infinite_dataset:
                 batch_idx = self.global_step
@@ -639,9 +636,10 @@ class BaseTrainer(ABC):
             if isinstance(self.model, torch.nn.parallel.DistributedDataParallel)
             else self.model
         )
+        init_batch_count = self.cfg.trainer.get("init_batch_count", 0)
         for m in model.modules():
             if hasattr(m, "batch_count"):
-                m.batch_count = self.global_step
+                m.batch_count = self.global_step + init_batch_count
 
     def _forward_backward_optimize(self, batch):
         """

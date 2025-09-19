@@ -36,15 +36,6 @@ trainer:
   use_fp16: True
   tensorboard: True
 
-  # If true, periodically sync ScheduledFloat to training progress (global_step)
-  # Motivation:
-  #   - When training and updating weights, we want step-dependent schedules to evolve with progress.
-  #   - When not changing weights (inference/frozen), prefer using defaults (set this to false).
-  # Behavior:
-  #   - True: every 10 batches, set modules' `batch_count = global_step`.
-  #   - False: trainer won’t touch `batch_count`; ScheduledFloat returns defaults unless you set it manually.
-  set_batch_count: True
-
   prune_range: 5 # The prune range for rnnt loss, it means how many symbols(context) we are using to compute the loss
   lm_scale: 0.25 # The scale to smooth the loss with lm(output of prediction network) part
   am_scale: 0 #The scale to smooth the loss with am (output of encoder network) part

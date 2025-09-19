@@ -77,13 +77,15 @@ class ZipformerEncoderModel(nn.Module):
             detected_module = module_name
         elif hasattr(config, "audio_encoder_config"):
             detected_module = "audio_encoder"
+        elif hasattr(config, "speech_encoder_config"):
+            detected_module = "speech_encoder"
         elif hasattr(config, "encoder_config"):
             detected_module = "encoder"
 
         if detected_module is None:
             raise ValueError(
                 "Could not determine encoder submodule. Provide module_name or ensure "
-                "config has 'audio_encoder_config' or 'encoder_config'."
+                "config has 'audio_encoder_config' or 'speech_encoder_config' or 'encoder_config'."
             )
 
         sub_config = (
@@ -107,10 +109,21 @@ class ZipformerEncoderModel(nn.Module):
             return None
 
         candidate = state_dict
-        for pfx in ["module.", f"{detected_module}.", "audio_encoder.", "encoder."]:
+        # Strip DDP prefix at most once
+        stripped = _strip_prefix(candidate, "module.")
+        if stripped:
+            candidate = stripped
+        # Then strip at most one model-level prefix to avoid double-removal
+        for pfx in [
+            f"{detected_module}.",
+            "audio_encoder.",
+            "speech_encoder.",
+            "encoder.",
+        ]:
             stripped = _strip_prefix(candidate, pfx)
             if stripped:
                 candidate = stripped
+                break
         state_dict = candidate
 
         missing, unexpected = model.load_state_dict(state_dict, strict=strict)
