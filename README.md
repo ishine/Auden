@@ -98,3 +98,4 @@ This repository also includes a [NOTICE](NOTICE) file with third-party attributi
 ## Acknowledgements
 - This project draws inspiration from the design and user experience of [Hugging Face Transformers](https://github.com/huggingface/transformers), especially around `Auto*` APIs and configuration patterns.
 - Many ASR components and utilities (e.g., Zipformer encoder variants, WER tooling) are adapted from or inspired by [k2-fsa/icefall](https://github.com/k2-fsa/icefall). We thank the Icefall authors and contributors for their excellent work and open-source spirit.
+- Parts of the data pipeline and dataset handling build upon [Lhotse](https://github.com/lhotse-speech/lhotse). We thank the Lhotse authors and contributors for their work and open-source efforts.
