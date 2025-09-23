@@ -19,7 +19,7 @@ CONFIG_MAPPING_NAMES: "OrderedDict[str, tuple[str, str]]" = OrderedDict(
         ("zipformer", ("auden.models.zipformer.model_config", "ZipformerConfig")),
         ("asr", ("auden.models.asr.model_config", "AsrConfig")),
         ("audio-tag", ("auden.models.audio_tag.model_config", "AudioTagConfig")),
-        ("audio-clap", ("auden.models.audio_clap.model_config", "AudioClapConfig")),
+        ("clap", ("auden.models.clap.model_config", "ClapConfig")),
         (
             "audio-caption",
             ("auden.models.audio_caption.model_config", "AudioCaptionConfig"),

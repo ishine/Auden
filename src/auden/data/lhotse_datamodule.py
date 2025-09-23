@@ -229,11 +229,6 @@ class BaseLhotseDatamodule(ABC):
             else:
                 cutset = cutset.repeat(weight)
 
-            # Validate cutset
-            if len(cutset) == 0:
-                logging.warning(f"Empty cutset: {manifest_path}")
-                continue
-
             cutset[0].load_audio()  # Validate audio access
             cutset_hours.append(weight * hours)
             cutset_list.append(cutset)
