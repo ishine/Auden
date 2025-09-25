@@ -101,13 +101,6 @@ def main(cfg: DictConfig):
 
     # load pretrained encoder weights
     model.encoder.load_state_dict(pretrained_encoder.state_dict(), strict=True)
-    from omegaconf import open_dict
-
-    with open_dict(cfg.trainer):
-        cfg.trainer.init_batch_count = 100000
-    logging.info(
-        "Loaded pretrained encoder; setting trainer.init_batch_count=100000 to saturate scheduledfloat"
-    )
 
     # freeze encoder weights
     if cfg.model.encoder.freeze_encoder:

@@ -139,7 +139,7 @@ class ZipformerEncoderModel(nn.Module):
         model.eval()
         return model
 
-    def __init__(self, config):
+    def __init__(self, config, init_batch_count=0):
         super().__init__()
         self.config = config
         self.feature_extractor = None
@@ -170,11 +170,50 @@ class ZipformerEncoderModel(nn.Module):
             left_context_frames=tuple(config.left_context_frames),
         )
         self.encoder_out_dim = max(config.encoder_dim)
+        # model_batch_count for ScheduledFloat
+        self.register_buffer(
+            "model_batch_count",
+            torch.tensor(init_batch_count, dtype=torch.float),
+            persistent=True,
+        )
 
-    def set_batch_count(self, count):
+    def set_batch_count(self):
         for m in self.modules():
             if hasattr(m, "batch_count"):
-                m.batch_count = count
+                m.batch_count = float(self.model_batch_count.item())
+
+    def _load_from_state_dict(
+        self,
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
+    ):
+        """Backward-compatible loading: ensure 'model_batch_count' exists.
+
+        Old checkpoints lack this registered buffer. We set it to 100000 
+        so strict=True loads remain possible without warnings and ScheduledFloat is saturated.
+        """
+        key = prefix + "model_batch_count"
+        if key not in state_dict:
+            # Default to a large value (100000) to saturate ScheduledFloat for old ckpts
+            state_dict[key] = torch.tensor(
+                100000.0,
+                dtype=self.model_batch_count.dtype,
+                device=self.model_batch_count.device,
+            )
+        super()._load_from_state_dict(
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        )
 
     def forward(self, x: torch.Tensor, x_lens: torch.Tensor) -> ZipformerEncoderOutput:
         """Compute encoder outputs.

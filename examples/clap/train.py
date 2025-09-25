@@ -152,18 +152,18 @@ def main(cfg: DictConfig):
         model.audio_encoder.load_state_dict(
             pretrained_audio_encoder.state_dict(), strict=True
         )
-        from omegaconf import open_dict
+        # from omegaconf import open_dict
 
-        with open_dict(cfg.trainer):
-            cfg.trainer.init_batch_count = 100000
-        logging.info(
-            "Loaded pretrained audio encoder; setting trainer.init_batch_count=100000 to saturate scheduledfloat"
-        )
+        # with open_dict(cfg.trainer):
+        #     cfg.trainer.init_batch_count = 100000
+        # logging.info(
+        #     "Loaded pretrained audio encoder; setting trainer.init_batch_count=100000 to saturate scheduledfloat"
+        # )
         if rank == 0:
             src = cfg.model.audio_encoder.get("pretrained_model")
-            num_params = sum(p.numel() for p in model.audio_encoder.parameters())
+            num_params = sum(p.numel() for p in model.audio_encoder.parameters()) / 1e6
             logging.info(
-                f"[clap.train] Loaded audio encoder weights from {src} (strict=True); params={num_params}"
+                f"[clap.train] Loaded audio encoder weights from {src} (strict=True); params={num_params} M"
             )
 
     if pretrained_text_encoder is not None:
@@ -172,9 +172,11 @@ def main(cfg: DictConfig):
         )
         if rank == 0:
             src_txt = cfg.model.text_encoder.get("pretrained_model")
-            num_params_txt = sum(p.numel() for p in model.text_encoder.parameters())
+            num_params_txt = (
+                sum(p.numel() for p in model.text_encoder.parameters()) / 1e6
+            )
             logging.info(
-                f"[clap.train] Loaded text encoder weights from {src_txt} (strict=True); params={num_params_txt}"
+                f"[clap.train] Loaded text encoder weights from {src_txt} (strict=True); params={num_params_txt} M"
             )
 
     # freeze encoder weights
@@ -182,17 +184,19 @@ def main(cfg: DictConfig):
         for p in model.audio_encoder.parameters():
             p.requires_grad = False
         if rank == 0:
-            num_params = sum(p.numel() for p in model.audio_encoder.parameters())
+            num_params = sum(p.numel() for p in model.audio_encoder.parameters()) / 1e6
             logging.info(
-                f"[clap.train] Froze audio encoder weights ({num_params} params)"
+                f"[clap.train] Froze audio encoder weights ({num_params} M params)"
             )
     if cfg.model.text_encoder.get("frozen"):
         for p in model.text_encoder.parameters():
             p.requires_grad = False
         if rank == 0:
-            num_params_txt = sum(p.numel() for p in model.text_encoder.parameters())
+            num_params_txt = (
+                sum(p.numel() for p in model.text_encoder.parameters()) / 1e6
+            )
             logging.info(
-                f"[clap.train] Froze text encoder weights ({num_params_txt} params)"
+                f"[clap.train] Froze text encoder weights ({num_params_txt} M params)"
             )
 
     # Save config for reproducibility
