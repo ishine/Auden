@@ -55,7 +55,7 @@ Evaluate a pretrained/exported model checkpoint:
 ```
 python evaluate.py \
   exp_dir=./exp/your_exp_dir \
-  checkpoint.model.filename=/abs/path/to/model.pt \
+  checkpoint.filename=/abs/path/to/model.pt \
   data.test_data_config=examples/asr_llm/configs/test_data_config.yaml \
   decoding_method=greedy_search
 ```
@@ -64,12 +64,12 @@ Average from trainer checkpoints, save to the same exp_dir, then evaluate:
 ```
 python evaluate.py \
   exp_dir=/exp/your_exp_dir \
-  checkpoint.model.iter=100000 checkpoint.model.avg=5 \
+  checkpoint.iter=100000 checkpoint.avg=5 \
   data.test_data_config=./configs/test_data_config.yaml
 ```
 
 Checkpoint resolution policy (evaluate.py):
-- If checkpoint.model.filename is set, use that file (absolute or under exp_dir)
+- If checkpoint.filename is set, use that file (absolute or under exp_dir)
 - Else if iter>0 and avg>0, create/use `averaged-iter-{iter}-avg-{avg}.pt`
 - Else if epoch>0 and avg>0, create/use `averaged-epoch-{epoch}-avg-{avg}.pt`
 - Else fallback to `exp_dir/pretrained.pt`
