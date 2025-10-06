@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 
 from ...auto.auto_config import AutoConfig
+from ...auto.auto_model import AutoModel
 from .features import construct_feature_extractor as _construct_fbank
 from .features import extract_features as _extract_features
 from .modeling_output import ZipformerEncoderOutput
@@ -43,6 +44,9 @@ class ZipformerEncoderModel(nn.Module):
             dtype: Optional dtype to move the model to after loading.
             device: Optional device to move the model to after loading.
         """
+        # Support HF Hub repo IDs
+        if not os.path.exists(model_path):
+            model_path = AutoModel._download_from_hub(model_path)
         # Resolve model_dir and weight file
         if os.path.isdir(model_path):
             model_dir = model_path

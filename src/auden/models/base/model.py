@@ -261,6 +261,7 @@ class BaseModel(nn.Module):
         model = cls(config, **kwargs)
 
         # Load model weights
+        weights_path = None
         if model_path.is_dir():
             # Prefer safetensors, then fallback to .bin/.pt
             for candidate in [
@@ -271,12 +272,12 @@ class BaseModel(nn.Module):
                 if candidate.exists():
                     weights_path = candidate
                     break
-            else:
+            if weights_path is None:
                 logging.warning(f"No model weights found at {model_path}")
         else:
             weights_path = model_path
 
-        if weights_path.exists():
+        if weights_path is not None and weights_path.exists():
             suffix = weights_path.suffix.lower()
             if suffix == ".safetensors":
                 from safetensors.torch import load_file as safe_load_file
@@ -286,7 +287,7 @@ class BaseModel(nn.Module):
                 state_dict = torch.load(weights_path, map_location="cpu")
             model.load_state_dict(state_dict)
             logging.info(f"Model loaded from {weights_path}")
-        else:
+        elif weights_path is not None:
             logging.warning(f"No model weights found at {weights_path}")
 
         return model

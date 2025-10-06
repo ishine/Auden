@@ -44,6 +44,9 @@ class ClapModel(nn.Module):
     ):
         """Load CLAP model from directory or weight file, supports .pt and .safetensors."""
 
+        # Support HF Hub repo IDs
+        if not os.path.exists(model_path):
+            model_path = AutoModel._download_from_hub(model_path)
         # Resolve model_dir and candidate weight file
         if os.path.isdir(model_path):
             model_dir = model_path

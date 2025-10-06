@@ -57,6 +57,9 @@ class AudioLLMModel(nn.Module):
         *,
         map_location: str | torch.device = "cpu",
     ) -> "AudioLLMModel":
+        # Support HF Hub repo IDs
+        if not os.path.exists(model_path):
+            model_path = AutoModel._download_from_hub(model_path)
         # Resolve directory and checkpoint
         if os.path.isdir(model_path):
             model_dir = model_path

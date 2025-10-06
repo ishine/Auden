@@ -35,7 +35,9 @@ class AsrModel(nn.Module):
         strict: bool = True,
         map_location: str | torch.device = "cpu",
     ):
-        # Resolve model_dir and checkpoint
+        # Resolve model_dir and checkpoint (supports HF Hub repo IDs)
+        if not os.path.exists(model_path):
+            model_path = AutoModel._download_from_hub(model_path)
         if os.path.isdir(model_path):
             model_dir = model_path
             weight_path = None

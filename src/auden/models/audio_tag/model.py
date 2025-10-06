@@ -43,6 +43,9 @@ class AudioTagModel(nn.Module):
         instantiates the model, then loads weights from ``pretrained.pt``/``model.pt``
         or the given ``.pt`` file.
         """
+        # Support HF Hub repo IDs
+        if not os.path.exists(model_path):
+            model_path = AutoModel._download_from_hub(model_path)
         # Resolve model_dir and weight path
         if os.path.isdir(model_path):
             model_dir = model_path
