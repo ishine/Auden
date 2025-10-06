@@ -31,7 +31,6 @@ torchrun --nproc_per_node=8 train.py \
 Notes:
 - `model.encoder`: model_type (e.g., zipformer) or a path/HF repo with config.json.
 - `model.id2label`: path to JSON mapping like {"0": "label_0", ...}.
-- `trainer.set_batch_count`: True to follow training steps; False to use defaults.
 
 ## Finetuning or Linear Probing with a Pretrained Encoder
 ```
