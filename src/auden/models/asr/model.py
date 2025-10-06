@@ -35,22 +35,22 @@ class AsrModel(nn.Module):
         strict: bool = True,
         map_location: str | torch.device = "cpu",
     ):
-        # Resolve model_dir and weight file
+        # Resolve model_dir and checkpoint
         if os.path.isdir(model_path):
             model_dir = model_path
-            candidates = [
-                os.path.join(model_dir, "pretrained.pt"),
-                os.path.join(model_dir, "model.pt"),
-            ]
-            weight_path = next((p for p in candidates if os.path.exists(p)), None)
-            if weight_path is None:
-                # fallback: the first .pt file in directory
-                for fname in os.listdir(model_dir):
-                    if fname.endswith(".pt"):
-                        weight_path = os.path.join(model_dir, fname)
+            weight_path = None
+            for ext in (".safetensors", ".pt"):
+                for name in ("pretrained", "model"):
+                    p = os.path.join(model_dir, f"{name}{ext}")
+                    if os.path.exists(p):
+                        weight_path = p
                         break
-                if weight_path is None:
-                    raise FileNotFoundError(f"No .pt weights found under {model_dir}")
+                if weight_path is not None:
+                    break
+            if weight_path is None:
+                raise FileNotFoundError(
+                    f"Expected one of ['pretrained.safetensors','model.safetensors','pretrained.pt','model.pt'] under {model_dir}"
+                )
         else:
             weight_path = model_path
             model_dir, _ = os.path.split(model_path)
@@ -59,7 +59,18 @@ class AsrModel(nn.Module):
         tokenizer = AutoTokenizer.from_pretrained(Path(model_dir) / "tokenizer")
         model = cls(config, tokenizer)
 
-        state_obj = torch.load(weight_path, map_location=map_location)
+        ext = os.path.splitext(weight_path)[1].lower()
+        if ext == ".safetensors":
+            from safetensors.torch import load_file as safe_load_file
+
+            device_arg = (
+                str(map_location)
+                if isinstance(map_location, torch.device)
+                else map_location
+            )
+            state_obj = safe_load_file(weight_path, device=device_arg)
+        else:
+            state_obj = torch.load(weight_path, map_location=map_location)
         state_dict = (
             state_obj["state_dict"]
             if isinstance(state_obj, dict) and "state_dict" in state_obj

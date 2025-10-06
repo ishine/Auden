@@ -262,12 +262,28 @@ class BaseModel(nn.Module):
 
         # Load model weights
         if model_path.is_dir():
-            weights_path = model_path / "pytorch_model.bin"
+            # Prefer safetensors, then fallback to .bin/.pt
+            for candidate in [
+                model_path / "model.safetensors",
+                model_path / "model.bin",
+                model_path / "model.pt",
+            ]:
+                if candidate.exists():
+                    weights_path = candidate
+                    break
+            else:
+                logging.warning(f"No model weights found at {model_path}")
         else:
             weights_path = model_path
 
         if weights_path.exists():
-            state_dict = torch.load(weights_path, map_location="cpu")
+            suffix = weights_path.suffix.lower()
+            if suffix == ".safetensors":
+                from safetensors.torch import load_file as safe_load_file
+
+                state_dict = safe_load_file(str(weights_path), device="cpu")
+            else:
+                state_dict = torch.load(weights_path, map_location="cpu")
             model.load_state_dict(state_dict)
             logging.info(f"Model loaded from {weights_path}")
         else:

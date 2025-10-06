@@ -57,16 +57,18 @@ class AudioLLMModel(nn.Module):
         *,
         map_location: str | torch.device = "cpu",
     ) -> "AudioLLMModel":
-        # Resolve directory and base weight file (if any)
+        # Resolve directory and checkpoint
         if os.path.isdir(model_path):
             model_dir = model_path
-            weight_candidates = [
-                os.path.join(model_dir, "pretrained.pt"),
-                os.path.join(model_dir, "model.pt"),
-            ]
-            weight_path = next(
-                (p for p in weight_candidates if os.path.exists(p)), None
-            )
+            weight_path = None
+            for ext in (".safetensors", ".pt"):
+                for name in ("pretrained", "model"):
+                    p = os.path.join(model_dir, f"{name}{ext}")
+                    if os.path.exists(p):
+                        weight_path = p
+                        break
+                if weight_path is not None:
+                    break
         else:
             model_dir, _ = os.path.split(model_path)
             weight_path = model_path
@@ -80,7 +82,18 @@ class AudioLLMModel(nn.Module):
 
         # Load composite weights if present (may exclude some modules)
         if weight_path and os.path.exists(weight_path):
-            state_obj = torch.load(weight_path, map_location=map_location)
+            ext = os.path.splitext(weight_path)[1].lower()
+            if ext == ".safetensors":
+                from safetensors.torch import load_file as safe_load_file
+
+                device_arg = (
+                    str(map_location)
+                    if isinstance(map_location, torch.device)
+                    else map_location
+                )
+                state_obj = safe_load_file(weight_path, device=device_arg)
+            else:
+                state_obj = torch.load(weight_path, map_location=map_location)
             state_dict = (
                 state_obj.get("state_dict", state_obj)
                 if isinstance(state_obj, dict)
