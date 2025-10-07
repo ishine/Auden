@@ -86,7 +86,7 @@ class ZipformerEncoderModel(nn.Module):
             state_dict = state_obj
         logging.info(f"Loaded weights for type {config.model_type} from {weight_path}")
 
-        # Determine sub-config if composite
+        # Determine sub-config: allow both composite configs and direct encoder config
         detected_module = None
         if module_name is not None:
             detected_module = module_name
@@ -97,21 +97,15 @@ class ZipformerEncoderModel(nn.Module):
         elif hasattr(config, "encoder_config"):
             detected_module = "encoder"
 
-        if detected_module is None:
-            raise ValueError(
-                "Could not determine encoder submodule. Provide module_name or ensure "
-                "config has 'audio_encoder_config' or 'speech_encoder_config' or 'encoder_config'."
-            )
-
-        sub_config = (
-            getattr(config, f"{detected_module}_config")
-            if hasattr(config, f"{detected_module}_config")
-            else None
-        )
-        if sub_config is None:
-            raise ValueError(
-                f"Config does not contain '{detected_module}_config' needed for encoder."
-            )
+        if detected_module is not None:
+            sub_config = getattr(config, f"{detected_module}_config", None)
+            if sub_config is None:
+                raise ValueError(
+                    f"Config does not contain '{detected_module}_config' needed for encoder."
+                )
+        else:
+            # Direct encoder config saved at model_dir
+            sub_config = config
 
         model = cls(sub_config)
 
@@ -128,17 +122,18 @@ class ZipformerEncoderModel(nn.Module):
         stripped = _strip_prefix(candidate, "module.")
         if stripped:
             candidate = stripped
-        # Then strip at most one model-level prefix to avoid double-removal
-        for pfx in [
-            f"{detected_module}.",
-            "audio_encoder.",
-            "speech_encoder.",
-            "encoder.",
-        ]:
-            stripped = _strip_prefix(candidate, pfx)
-            if stripped:
-                candidate = stripped
-                break
+        # For composite parents, strip one parent-level prefix; skip for direct encoders
+        if detected_module is not None:
+            for pfx in [
+                f"{detected_module}.",
+                "audio_encoder.",
+                "speech_encoder.",
+                "encoder.",
+            ]:
+                stripped = _strip_prefix(candidate, pfx)
+                if stripped:
+                    candidate = stripped
+                    break
         state_dict = candidate
 
         missing, unexpected = model.load_state_dict(state_dict, strict=strict)
@@ -253,6 +248,74 @@ class ZipformerEncoderModel(nn.Module):
             encoder_out_lens=outputs[1],
             encoder_out_full=outputs[2].permute(0, 2, 1, 3),  # (N_blocks, N, T, C)
         )
+
+    def save_pretrained(
+        self,
+        save_directory: str,
+        *,
+        filename: str | None = None,
+        use_safetensors: bool = True,
+    ) -> str:
+        """Save model weights and config to a directory (HF-style).
+
+        Writes config via ``config.save_pretrained(save_directory)`` and weights to
+        ``model.safetensors`` by default (falls back to ``model.pt`` if
+        safetensors is unavailable or ``use_safetensors=False``).
+
+        Args:
+            save_directory: Target directory.
+            filename: Optional explicit filename for weights. If None, chooses
+                ``model.safetensors`` or ``model.pt``.
+            use_safetensors: Prefer the safetensors format when possible.
+
+        Returns:
+            The path of the saved weight file.
+        """
+        os.makedirs(save_directory, exist_ok=True)
+
+        # Save configuration next to weights
+        # Assumes encoder sub-config supports save_pretrained
+        self.config.save_pretrained(save_directory)
+
+        # Decide filename and format
+        weight_path: str
+        chosen_filename = filename
+        if chosen_filename is None:
+            if use_safetensors:
+                try:
+                    from safetensors.torch import (  # noqa: F401
+                        save_file as safe_save_file,
+                    )
+
+                    chosen_filename = "model.safetensors"
+                except Exception:
+                    chosen_filename = "model.pt"
+            else:
+                chosen_filename = "model.pt"
+
+        weight_path = os.path.join(save_directory, chosen_filename)
+
+        # Always save CPU state_dict for portability
+        state_dict = {k: v.detach().cpu() for k, v in self.state_dict().items()}
+
+        ext = os.path.splitext(weight_path)[1].lower()
+        if ext == ".safetensors":
+            try:
+                from safetensors.torch import save_file as safe_save_file
+
+                safe_save_file(state_dict, weight_path)
+            except Exception as e:
+                # Fallback to .pt if safetensors is unavailable
+                logging.warning(
+                    f"Failed to save safetensors ({e}); falling back to PyTorch .pt"
+                )
+                weight_path = os.path.splitext(weight_path)[0] + ".pt"
+                torch.save(state_dict, weight_path)
+        else:
+            torch.save(state_dict, weight_path)
+
+        logging.info(f"Saved model to {weight_path}")
+        return weight_path
 
     def construct_feature_extractor(
         self,

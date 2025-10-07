@@ -61,51 +61,121 @@ class BaseConfig:
         method. Private attributes (starting with ``_``) and callables are
         skipped.
         """
+
+        # Prefer HF-style minimal dict for Hugging Face configs, otherwise keep full
+        try:
+            from transformers import (
+                PretrainedConfig as _HFPretrainedConfig,  # type: ignore
+            )
+        except Exception:  # transformers is optional
+            _HFPretrainedConfig = None  # type: ignore
+
         output = {}
         for key, value in self.__dict__.items():
             if key.startswith("_") or callable(value):
                 continue
-            if hasattr(value, "to_dict"):
-                output[key] = value.to_dict()
+            if _HFPretrainedConfig is not None and isinstance(
+                value, _HFPretrainedConfig
+            ):
+                # Delegate to HF's compact serialization for nested HF configs
+                nested = value.to_diff_dict()
+            elif hasattr(value, "to_dict"):
+                nested = value.to_dict()
             else:
-                output[key] = value
+                nested = value
+            output[key] = nested
         return output
 
-    def save_pretrained(self, output_dir: str):
-        """Save this config instance to ``output_dir/config.json``.
+    def to_diff_dict(self):
+        """Return only fields that differ from class defaults (HF-like)."""
 
-        Behavior:
-        - If an identical config already exists, saving is skipped.
-        - If a different config exists, it is backed up with a timestamp before saving.
-        """
-        new_config = self.to_dict()
-        os.makedirs(output_dir, exist_ok=True)
-        config_path = Path(output_dir) / "config.json"
+        # Prefer HF-style minimal dict for Hugging Face configs when diffing
+        try:
+            from transformers import (
+                PretrainedConfig as _HFPretrainedConfig,  # type: ignore
+            )
+        except Exception:
+            _HFPretrainedConfig = None  # type: ignore
+
+        def _public_dict(obj):
+            if _HFPretrainedConfig is not None and isinstance(obj, _HFPretrainedConfig):
+                return obj.to_diff_dict()
+            if hasattr(obj, "to_dict"):
+                return obj.to_dict()
+            if isinstance(obj, dict):
+                return obj
+            return obj
+
+        def _diff(current: dict, default: dict) -> dict:
+            diff = {}
+            for key, cur_val in current.items():
+                if key.startswith("_"):
+                    continue
+                def_val = default.get(key, None)
+                if hasattr(cur_val, "to_dict") or isinstance(cur_val, dict):
+                    cur_map = _public_dict(cur_val)
+                    def_map = (
+                        def_val if isinstance(def_val, dict) else _public_dict(def_val)
+                    )
+                    if isinstance(cur_map, dict) and isinstance(def_map, dict):
+                        sub = _diff(cur_map, def_map)
+                        if sub:
+                            diff[key] = sub
+                    else:
+                        if cur_map != def_val:
+                            diff[key] = cur_val
+                else:
+                    if cur_val != def_val:
+                        diff[key] = cur_val
+            return diff
+
+        current = self.to_dict()
+        try:
+            defaults = self.__class__().to_dict()
+        except Exception:
+            return current
+        return _diff(current, defaults)
+
+    def save_pretrained(
+        self,
+        output_dir: str,
+        *,
+        subfolder: str | None = None,
+        filename: str | None = None,
+        use_diff: bool = False,
+    ):
+        """Save this config to config.json (HF-like)."""
+        target_dir = Path(output_dir)
+        if subfolder:
+            target_dir = target_dir / subfolder
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        data = self.to_diff_dict() if use_diff else self.to_dict()
+        config_filename = filename or "config.json"
+        config_path = target_dir / config_filename
 
         if config_path.exists():
             try:
                 with open(config_path, "r") as f:
                     existing_config = json.load(f)
-                if existing_config == new_config:
+                if existing_config == data:
                     logging.info(
                         f"[save_config] Skipped saving. Config identical to existing one."
                     )
-                    return
-                # Backup old config
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                backup_path = config_path.with_name(f"config.{timestamp}.bak.json")
-                shutil.move(config_path, backup_path)
-                logging.info(
-                    f"[save_config] Existing config backed up to: {backup_path}"
-                )
+                else:
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    backup_path = config_path.with_name(f"config.{timestamp}.bak.json")
+                    shutil.move(config_path, backup_path)
+                    logging.info(
+                        f"[save_config] Existing config backed up to: {backup_path}"
+                    )
             except Exception as e:
                 logging.warning(
                     f"[save_config] Could not compare with existing config: {e}. Proceeding to save."
                 )
 
-        # Save new config
-        with open(config_path, "w") as f:
-            json.dump(new_config, f, indent=2)
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
         logging.info(f"[save_config] Saved config to: {config_path}")
 
     @classmethod
