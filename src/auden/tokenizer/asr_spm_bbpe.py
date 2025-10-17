@@ -48,6 +48,22 @@ class AsrSpmBbpeTokenizer(AsrSpmTokenizer):
         texts = [byte_encode(tokenize_by_CJK_char(text)) for text in texts]
         return self._tokenizer.encode(texts, out_type=int)
 
-    def decode(self, token_ids: List[List[int]]) -> List[str]:
+    def decode(
+        self, token_ids: List[List[int]], *, skip_bos_eos: bool = False
+    ) -> List[str]:
+        """Decode token id sequences to strings.
+
+        Args:
+            token_ids: List of token id sequences.
+            skip_bos_eos: If True, remove BOS/EOS token ids before decoding.
+
+        Returns:
+            List of decoded strings.
+        """
+        if skip_bos_eos:
+            bos_id = self.bos_token_id
+            eos_id = self.eos_token_id
+            remove_ids = {bos_id, eos_id}
+            token_ids = [[t for t in seq if t not in remove_ids] for seq in token_ids]
         texts = self._tokenizer.decode(token_ids)
         return [smart_byte_decode(text) for text in texts]

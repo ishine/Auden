@@ -29,6 +29,7 @@ CONFIG_MAPPING_NAMES: "OrderedDict[str, tuple[str, str]]" = OrderedDict(
             "spk-veri",
             ("auden.models.spk_veri.model_config", "SpeakerVerificationConfig"),
         ),
+        ("tta", ("auden.models.tta.model_config", "TtaConfig")),
     ]
 )
 

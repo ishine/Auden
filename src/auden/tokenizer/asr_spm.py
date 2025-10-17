@@ -62,6 +62,14 @@ class AsrSpmTokenizer(AbstractAsrTokenizer):
     def unk_id(self) -> int:
         return self._tokenizer.piece_to_id("<unk>")
 
+    @property
+    def bos_token_id(self) -> int:
+        return self._tokenizer.piece_to_id("<sos/eos>")
+
+    @property
+    def eos_token_id(self) -> int:
+        return self._tokenizer.piece_to_id("<sos/eos>")
+
     def encode(self, text: Union[str, List[str]]) -> List[List[int]]:
         # Wrap single string to list for consistent List[List[int]] output
         if isinstance(text, str):
@@ -76,5 +84,21 @@ class AsrSpmTokenizer(AbstractAsrTokenizer):
             ]
         return text_ids
 
-    def decode(self, token_ids: List[List[int]]) -> List[str]:
+    def decode(
+        self, token_ids: List[List[int]], *, skip_bos_eos: bool = False
+    ) -> List[str]:
+        """Decode token id sequences to strings.
+
+        Args:
+            token_ids: List of token id sequences.
+            skip_bos_eos: If True, remove BOS/EOS token ids before decoding.
+
+        Returns:
+            List of decoded strings.
+        """
+        if skip_bos_eos:
+            bos_id = self.bos_token_id
+            eos_id = self.eos_token_id
+            remove_ids = {bos_id, eos_id}
+            token_ids = [[t for t in seq if t not in remove_ids] for seq in token_ids]
         return self._tokenizer.decode(token_ids)

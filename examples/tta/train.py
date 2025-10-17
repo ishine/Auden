@@ -1,30 +1,11 @@
-"""CLAP training entry script using Hydra and torch.distributed.
+"""TTA training entry script using Hydra and torch.distributed.
 
-This mirrors the audio_tag example structure while adapting the trainer/datamodule
-to audio–text contrastive learning. It wires model, datamodule and trainer, and
-supports single-GPU and DDP via torchrun.
+This script wires together the model, tokenizer(s), data module and trainer,
+supporting single- or multi-GPU training via torchrun.
 
-Usage:
-    # single GPU
-    python examples/clap/train.py exp_dir=./exp/your_exp_dir
-
-    # multi-GPU (DDP)
-    torchrun --nproc_per_node=8 examples/clap/train.py exp_dir=./exp/your_exp_dir
-
-Config highlights (see examples/clap/configs/train.yaml):
-- cfg.model.model_type: "clap"
-- cfg.model.audio_encoder: { model_type, pretrained_model?, frozen }
-- cfg.model.text_encoder:  { model_type or pretrained_model?, frozen }
-- cfg.data: Lhotse-based datamodule configs (see examples/clap/configs/)
-- cfg.trainer: optimizer/scheduler, intervals, optional gather_embeddings, etc.
-
-Notes:
-- If pretrained encoders are provided, their weights are loaded and can be frozen
-  according to cfg.model.*.frozen, with logging of sources and parameter counts.
-- For the text encoder: if "pretrained_model" is set it is used; otherwise
-  "model_type" should be a valid HF identifier (e.g., "bert-base-uncased",
-  "roberta-base").
-- The script saves the model config and tokenizer to exp_dir for reproducibility.
+Compared to the plain ASR example, this variant optionally initializes a
+separate text-encoder tokenizer and passes TTA-specific flags/special tokens
+into the model configuration.
 """
 
 import logging
@@ -33,21 +14,22 @@ import os
 import hydra
 import torch
 import torch.distributed as dist
-from data_module import AudioCaptionDatamodule
+from data_module import TtaDatamodule
 from omegaconf import DictConfig, OmegaConf
-from trainer import ClapTrainer as Trainer
+from trainer import TtaTrainer as Trainer
 from transformers import AutoConfig as HFConfig
 from transformers import AutoTokenizer as HFTokenizer
 
 from auden.auto.auto_config import AutoConfig
 from auden.auto.auto_model import AutoModel
+from auden.auto.auto_tokenizer import AutoTokenizer
 
 
-def load_pretrained_audio_encoder(cfg: DictConfig):
+def load_pretrained_speech_encoder(cfg: DictConfig):
     """Build audio encoder config and optionally load a pretrained module.
 
     Args:
-        cfg: The audio encoder section, e.g. ``cfg.model.audio_encoder`` with fields:
+        cfg: The speech encoder section, e.g. ``cfg.model.speech_encoder`` with fields:
              - model_type: string identifier (e.g., "zipformer")
              - pretrained_model: optional path/identifier
 
@@ -102,7 +84,7 @@ def load_pretrained_text_encoder(cfg: DictConfig):
 
     # 1) Pretrained weights path/name provided
     if pretrained:
-        encoder_model = HFModel.from_pretrained(pretrained, add_pooling_layer=False)
+        encoder_model = HFModel.from_pretrained(pretrained)
         encoder_config = encoder_model.config
         tokenizer = HFTokenizer.from_pretrained(pretrained)
         return encoder_config, encoder_model, tokenizer
@@ -110,7 +92,7 @@ def load_pretrained_text_encoder(cfg: DictConfig):
     # 2) Empty-by-type via AutoConfig.from_pretrained when model_type is an identifier
     encoder_model = None
     # Treat model_type as a full identifier for AutoConfig/tokenizer
-    encoder_config = HFConfig.from_pretrained(model_type, add_pooling_layer=False)
+    encoder_config = HFConfig.from_pretrained(model_type)
     tokenizer = HFTokenizer.from_pretrained(model_type)
     return encoder_config, encoder_model, tokenizer
 
@@ -119,42 +101,59 @@ def load_pretrained_text_encoder(cfg: DictConfig):
 def main(cfg: DictConfig):
     logging.info("\n" + OmegaConf.to_yaml(cfg))
 
-    # DDP env
+    # 1) Gather torchrun environment variables
     rank = int(os.environ.get("RANK", 0))
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
+
+    # 2) Initialize process group if multi-GPU
     if world_size > 1:
         torch.cuda.set_device(local_rank)
         dist.init_process_group(backend="nccl", init_method="env://")
 
-    # exp dir
+    # 3) Create experiment directory
     if cfg.get("exp_dir"):
         os.makedirs(cfg.exp_dir, exist_ok=True)
 
-    # load pretrained encoders
-    audio_encoder_config, pretrained_audio_encoder = load_pretrained_audio_encoder(
-        cfg.model.audio_encoder
+    speech_encoder_config, pretrained_speech_encoder = load_pretrained_speech_encoder(
+        cfg.model.speech_encoder
     )
-    text_encoder_config, pretrained_text_encoder, tokenizer = (
+    text_encoder_config, pretrained_text_encoder, text_tokenizer = (
         load_pretrained_text_encoder(cfg.model.text_encoder)
     )
 
-    # Assemble CLAP config and model
+    special_tokens = [str(x) for x in cfg.model.get("special_tokens", [])]
+    if special_tokens:
+        logging.info(f"Using {len(special_tokens)} special tokens: {special_tokens}")
+
     config = AutoConfig.for_model(
         cfg.model.model_type,
-        audio_encoder_config=audio_encoder_config,
+        speech_encoder_config=speech_encoder_config,
         text_encoder_config=text_encoder_config,
+        special_tokens=special_tokens,
     )
-    model = AutoModel.from_config(config, tokenizer=tokenizer)
+
+    asr_tokenizer = AutoTokenizer.from_pretrained(cfg.tokenizer)
+
+    model = AutoModel.from_config(
+        config=config,
+        asr_tokenizer=asr_tokenizer,
+        text_tokenizer=text_tokenizer,
+    )
+
+    if rank == 0:
+        config.save_pretrained(cfg.exp_dir)
+        asr_tokenizer.save_pretrained(os.path.join(cfg.exp_dir, "asr_tokenizer"))
+        text_tokenizer.save_pretrained(os.path.join(cfg.exp_dir, "text_tokenizer"))
 
     # load pretrained encoder weights
-    if pretrained_audio_encoder is not None:
-        model.audio_encoder.load_state_dict(
-            pretrained_audio_encoder.state_dict(), strict=True
+    if pretrained_speech_encoder is not None:
+        model.speech_encoder.load_state_dict(
+            pretrained_speech_encoder.state_dict(), strict=True
         )
         if rank == 0:
-            src = cfg.model.audio_encoder.get("pretrained_model")
-            num_params = sum(p.numel() for p in model.audio_encoder.parameters()) / 1e6
+            src = cfg.model.speech_encoder.get("pretrained_model")
+            num_params = sum(p.numel() for p in model.speech_encoder.parameters()) / 1e6
             logging.info(
                 f"[clap.train] Loaded audio encoder weights from {src} (strict=True); params={num_params} M"
             )
@@ -173,11 +172,11 @@ def main(cfg: DictConfig):
             )
 
     # freeze encoder weights
-    if cfg.model.audio_encoder.get("frozen"):
-        for p in model.audio_encoder.parameters():
+    if cfg.model.speech_encoder.get("frozen"):
+        for p in model.speech_encoder.parameters():
             p.requires_grad = False
         if rank == 0:
-            num_params = sum(p.numel() for p in model.audio_encoder.parameters()) / 1e6
+            num_params = sum(p.numel() for p in model.speech_encoder.parameters()) / 1e6
             logging.info(
                 f"[clap.train] Froze audio encoder weights ({num_params} M params)"
             )
@@ -192,22 +191,18 @@ def main(cfg: DictConfig):
                 f"[clap.train] Froze text encoder weights ({num_params_txt} M params)"
             )
 
-    # Save config for reproducibility
-    if rank == 0 and cfg.get("exp_dir"):
-        config.save_pretrained(cfg.exp_dir)
-        if tokenizer is not None:
-            tokenizer.save_pretrained(cfg.exp_dir)
-        logging.info(f"[clap.train] Saved config and tokenizer to {cfg.exp_dir}")
-
-    # Datamodule & Trainer
-    data_module = AudioCaptionDatamodule(cfg.data)
+    # 7) Initialize data module and trainer
+    data_module = TtaDatamodule(cfg.data)
     trainer = Trainer(
         cfg, model, data_module, rank=rank, local_rank=local_rank, world_size=world_size
     )
     trainer.run()
 
+    # 8) Destroy process group if used
     if world_size > 1:
         dist.destroy_process_group()
+
+    logging.info("Training finished successfully.")
 
 
 if __name__ == "__main__":

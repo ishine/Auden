@@ -74,3 +74,25 @@ def add_sos(ragged: k2.RaggedTensor, sos_id: int) -> k2.RaggedTensor:
 
     """
     return concat(ragged, sos_id, direction="left")
+
+
+def add_eos(ragged: k2.RaggedTensor, eos_id: int) -> k2.RaggedTensor:
+    """Add EOS to each sublist.
+
+    Args:
+      ragged:
+        A ragged tensor with two axes.
+      eos_id:
+        The ID of the EOS symbol.
+
+    Returns:
+      Return a new ragged tensor, where each sublist ends with EOS.
+
+    >>> a = k2.RaggedTensor([[1, 3], [5]])
+    >>> a
+    [ [ 1 3 ] [ 5 ] ]
+    >>> add_eos(a, eos_id=0)
+    [ [ 1 3 0 ] [ 5 0 ] ]
+
+    """
+    return concat(ragged, eos_id, direction="right")

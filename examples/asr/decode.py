@@ -136,13 +136,7 @@ def main(cfg: DictConfig):
 
     # result dir
     res_dir = Path(cfg.exp_dir) / "greedy_search"
-    os.makedirs(res_dir, exist_ok=True)
-    if ckpt_cfg.get("filename", None):
-        results_file_suffix = Path(checkpoint_path).stem
-    elif ckpt_cfg.get("iter", 0) > 0:
-        results_file_suffix = f"iter-{ckpt_cfg.get('iter')}-avg-{ckpt_cfg.get('avg')}"
-    elif ckpt_cfg.get("epoch", 0) > 0:
-        results_file_suffix = f"epoch-{ckpt_cfg.get('epoch')}-avg-{ckpt_cfg.get('avg')}"
+    results_file_suffix = Path(checkpoint_path).stem
 
     for test_set_name, test_dl in zip(test_sets, test_dls):
         num_cuts = 0
