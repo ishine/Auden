@@ -1,0 +1,69 @@
+exp_dir:
+hydra:
+  run:
+    dir: ${exp_dir}/logs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+
+model:
+  model_type: azeros
+  speech_encoder:
+    model_type: zipformer
+    model_path: /apdcephfs_cq10/share_1603164/user/jamelynli/workspace/auden_lalm/egs/tta/exp/transferred/tta_averaged_iter480000_avg5.pt
+    frozen: true
+  speech_encoder_projector:
+    projector_type: encoder_projector
+    projector_ds_rate: 4
+  paraling_encoder:
+    model_type: zipformer
+    model_path: /apdcephfs_cq10/share_1603164/user/jamelynli/workspace/auden_lalm/egs/tta/exp/transferred/para.pt
+    frozen: true
+  paraling_encoder_projector:
+    projector_type: encoder_projector
+    projector_ds_rate: 4
+  llm: /apdcephfs_cq12/share_302080740/model/Qwen2.5-7B-Instruct
+  use_flash_attn: false
+
+trainer:
+  optimizer:
+    type: "adam"
+    lr: 0.001
+  scheduler:
+    type: "eden"
+    lr_epochs: 3.5
+    lr_batches: 7500
+    warmup_batches: 500
+    lr_steps_per_epoch: 0
+  num_epochs: 30
+  start_epoch: 1
+  num_steps: 3000000
+  start_batch: 0
+  ref_duration: 600
+  keep_last_k: 30
+  use_averaged_model: true
+  log_interval: 50
+  average_period: 200
+  reset_interval: 200
+  valid_interval: 1000
+  save_every_n: 4
+  use_fp16: true
+  tensorboard: true
+
+data:
+  train_data_config: configs/train_data_config.yaml
+  valid_data_config: configs/valid_data_config.yaml
+  on_the_fly_feats: true
+  sampling_rate: 16000
+  num_workers: 8
+  use_infinite_dataset: true
+  data_augmentation:
+    enable_spec_aug: true
+    enable_musan: false
+    musan: your_path_to_musan_cuts.jsonl.gz
+    enable_speed_perturb: false
+  sampler:
+    type: bucketing_sampler
+    num_buckets: 30
+    max_duration: 100
+    max_cuts: 4
+    shuffle: true
+    drop_last: true
+  text_normalization: true

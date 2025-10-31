@@ -1,0 +1,7 @@
+# List of test manifests
+# - name: test
+#   manifest: /abs/path/to/test_cuts.jsonl.gz
+#   lang: zh
+#   task: asr_naive
+
+
