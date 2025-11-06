@@ -2,18 +2,17 @@ from __future__ import annotations
 
 from transformers import AutoConfig as HFConfig
 
-from omegaconf import DictConfig
 from ...auto.auto_config import AutoConfig
 from ..base.model_config import BaseConfig
 
 def load_encoder_config(config):
-    if config.model_type is None:
+    if config['model_type'] is None:
         return None
-    if 'whisper' in config.model_type:
-        config = HFConfig.from_pretrained(config.model_path)
+    if 'whisper' in config['model_type']:
+        encoder_config = HFConfig.from_pretrained(config['model_path'])
     else:
-        config = AutoConfig.from_pretrained(config.model_path).encoder_config
-    return config
+        encoder_config = AutoConfig.from_pretrained(config['model_path'])
+    return encoder_config
 
 
 class AzerosConfig(BaseConfig):
@@ -23,17 +22,23 @@ class AzerosConfig(BaseConfig):
 
     def __init__(
         self,
-        llm,
+        llm: str,
         speech_encoder,
+        speech_encoder_projector,
         paraling_encoder,
+        paraling_encoder_projector,
         **kwargs,
     ):
-        self.speech_encoder = DictConfig(speech_encoder)
-        self.paraling_encoder = DictConfig(paraling_encoder)
-        self.speech_encoder_config = load_encoder_config(self.speech_encoder)
-        self.paraling_encoder_config = load_encoder_config(self.paraling_encoder)
+        super().__init__(**kwargs)
+
+        self.speech_encoder = dict(**speech_encoder)
+        self.speech_encoder_projector = dict(**speech_encoder_projector)
+
+        self.paraling_encoder = dict(**paraling_encoder)
+        self.paraling_encoder_projector = dict(**paraling_encoder_projector)
 
         self.llm = llm
         self.llm_config = HFConfig.from_pretrained(llm)
 
-        super().__init__(**kwargs)
+        self.speech_encoder_config = load_encoder_config(self.speech_encoder)
+        self.paraling_encoder_config = load_encoder_config(self.paraling_encoder)

@@ -1,11 +1,9 @@
-"""AZeroS decoding/evaluation script. Take naive ASR as example.
+"""Demo script for AZeroS decoding.
 """
 
 import logging
 import os
-from collections import defaultdict
 from functools import partial
-from pathlib import Path
 
 import hydra
 import torch
@@ -21,12 +19,10 @@ from lhotse import (
 )
 from lhotse.dataset import DynamicBucketingSampler, OnTheFlyFeatures
 from omegaconf import DictConfig, OmegaConf
-from results_utils import save_asr_results, save_bleu_results
 from torch.utils.data import DataLoader
 
 from auden.auto.auto_model import AutoModel
 from auden.utils.checkpoint import generate_model_checkpoint_from_trainer_checkpoints
-from auden.utils.text_normalization import text_normalization
 
 
 def _remove_long_short_utterance(c):
@@ -42,19 +38,6 @@ def _unified_language_code(c, lang):
     return c
 
 
-def _unified_text_normalize(text: str, lang: str | None = None):
-    return text_normalization(
-        text,
-        case="lower",
-        remove_diacritics=True,
-        remove_symbols=False,
-        simplified_chinese=True,
-        space_between_cjk=True,
-        remove_fillers=True,
-        remove_erhua=True,
-    )
-
-
 def get_test_dataloaders(cfg):
     test_dls = []
     test_names = []
@@ -62,7 +45,6 @@ def get_test_dataloaders(cfg):
         input_strategy = OnTheFlyFeatures(WhisperFbank(WhisperFbankConfig(num_filters=80)))
     else:
         input_strategy = OnTheFlyFeatures(Fbank(FbankConfig(num_mel_bins=80)))
-    test_tasks = []
     with open(cfg.data.test_data_config, "r") as file:
         test_data_config = yaml.load(file, Loader=yaml.FullLoader)
 
@@ -75,7 +57,6 @@ def get_test_dataloaders(cfg):
         if cfg.data.whisper_fbank:
             cutset = cutset.pad(num_samples=480000)
         test_name = test_set["name"]
-        test_task = test_set["task"]
         testset = Speech2ResponseDataset(
             input_strategy=input_strategy,
             return_cuts=True,
@@ -94,9 +75,8 @@ def get_test_dataloaders(cfg):
         )
         test_dls.append(test_dl)
         test_names.append(test_name)
-        test_tasks.append(test_task)
 
-    return test_names, test_dls, test_tasks
+    return test_names, test_dls
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="evaluate")
@@ -106,7 +86,7 @@ def main(cfg: DictConfig):
 
     # initialize dataloader
     set_audio_duration_mismatch_tolerance(0.1)
-    test_sets, test_dls, test_tasks = get_test_dataloaders(cfg)
+    test_sets, test_dls = get_test_dataloaders(cfg)
 
     # Resolve checkpoint path
     ckpt_cfg = cfg.checkpoint
@@ -137,7 +117,7 @@ def main(cfg: DictConfig):
             )
 
     # load model
-    model = AutoModel.from_pretrained(checkpoint_path)
+    model = AutoModel.from_pretrained(checkpoint_path, strict=False)
     device = (
         torch.device("cuda", 0) if torch.cuda.is_available() else torch.device("cpu")
     )
@@ -145,8 +125,6 @@ def main(cfg: DictConfig):
     model.eval()
     num_param = sum(p.numel() for p in model.parameters())
     logging.info(f"Number of model parameters: {num_param}")
-
-    results_file_suffix = Path(checkpoint_path).stem
 
     generate_config = {
         "max_new_tokens": 200,
@@ -161,12 +139,8 @@ def main(cfg: DictConfig):
     }
 
     # run evaluation
-    for test_set_name, test_dl, test_task in zip(test_sets, test_dls, test_tasks):
-        if test_task == "asr_naive":
-            res_dir = Path(cfg.exp_dir) / "asr_naive"
-        os.makedirs(res_dir, exist_ok=True)
+    for test_set_name, test_dl in zip(test_sets, test_dls):
         num_cuts = 0
-        results = defaultdict(list)
 
         for batch_idx, batch in enumerate(test_dl):
             cut_ids = [cut.id for cut in batch["supervisions"]["cut"]]
@@ -174,32 +148,19 @@ def main(cfg: DictConfig):
             feature = batch["inputs"].to(device)
             feature_lens = batch["supervisions"]["num_frames"].to(device)
 
-            if test_task == "asr_naive":
-                messages = [
-                    [
-                        {"role": "user", "content": model.audio_token_wrapped},
-                    ]
-                ] * len(feature)
-                hyps = model.generate((feature, feature_lens), messages, **generate_config)
-                texts = batch["supervisions"]["source_text"]
-            else:
-                raise ValueError(f"Unsupported task: {test_task}")
+            messages = [
+                [
+                    {"role": "user", "content": f"{model.audio_token} {instruction}"},
+                ] for instruction in batch["supervisions"]["instruction"]
+            ]
+            hyps = model.generate((feature, feature_lens), messages, **generate_config)
+            texts = batch["supervisions"]["response"]
 
-            hyps = [_unified_text_normalize(hyp).split() for hyp in hyps]
-            texts = [_unified_text_normalize(text).split() for text in texts]
-
-            this_batch = []
-            assert len(hyps) == len(texts)
-            for cut_id, hyp_words, ref_text in zip(cut_ids, hyps, texts):
-                this_batch.append((cut_id, ref_text, hyp_words))
-            results[test_set_name].extend(this_batch)
-
-            if batch_idx % 20 == 0:
-                logging.info(f"Processed {num_cuts} cuts already.")
-
-        save_asr_results(
-            res_dir, test_set_name, results, suffix=results_file_suffix
-        )
+            for hyp, ref in zip(hyps, texts):
+                print('-' * 20)
+                print(f"Ref-Text: {ref}")
+                print(f"Hyp-Text: {hyp}")
+                print()
 
 
 if __name__ == "__main__":

@@ -23,8 +23,13 @@ from ...auto.auto_model import AutoModel
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index
 DEFAULT_AUDIO_TOKEN = "<|AUDIO|>"
 DEFAULT_PLACE_HOLDER = "<|PLACEHOLDER|>"
-CHAT_TEMPLATE = "{% for message in messages %}{{'<|im_start|>' + message['role'] + '\n' + message['content']}}{% if loop.last %}{{ '<|im_end|>'}}{% else %}{{ '<|im_end|>\n' }}{% endif %}{% endfor %}"
-
+CHAT_TEMPLATE = """{% for message in messages -%}
+<|im_start|>{{ message['role'] }}
+{{ message['content'] }}<|im_end|>
+{% endfor -%}
+{% if add_generation_prompt -%}
+<|im_start|>assistant
+{% endif -%}"""
 
 class AzerosModel(nn.Module):
     @classmethod
@@ -102,6 +107,7 @@ class AzerosModel(nn.Module):
         self.exclude_from_checkpoint = config.exclude_from_checkpoint
 
         self.audio_token = DEFAULT_AUDIO_TOKEN
+        self.audio_token_wrapped = self.audio_token
         self.tokenizer.add_special_tokens(
             {"additional_special_tokens": [self.audio_token]}
         )
@@ -120,7 +126,7 @@ class AzerosModel(nn.Module):
             self.llm = AutoModelForCausalLM.from_config(
                 self.config.llm_config,
                 attn_implementation=self.attn_implementation,
-                torch_dtype=torch.float16
+                dtype=torch.float16
             )
 
         self.speech_encoder, self.speech_encoder_projector = self.set_speech_encoder(
@@ -131,6 +137,8 @@ class AzerosModel(nn.Module):
             config.paraling_encoder_config,
             config.paraling_encoder_projector,
         )
+        if self.paraling_encoder_projector is not None:
+            self.audio_token_wrapped = f"<audio><meta>{self.audio_token}</meta><text>{self.audio_token}</text></audio>"
 
         self.load_pretrained_modules()
 
@@ -151,14 +159,14 @@ class AzerosModel(nn.Module):
             speech_encoder = AutoModel.from_config(config)
             speech_encoder_dim = speech_encoder.encoder_out_dim
 
-        if projector.projector_type == 'encoder_projector':
+        if projector['projector_type'] == 'encoder_projector':
             encoder_projector = EncoderProjector(
                 speech_encoder_dim,
                 self.llm.config.hidden_size,
-                projector.projector_ds_rate
+                projector['projector_ds_rate']
             )
         else:
-            raise ValueError(f"Unsupported projector = '{projector.projector_type}'")
+            raise ValueError(f"Unsupported projector = {projector['projector_type']}")
         return speech_encoder, encoder_projector
 
     def load_pretrained_modules(self):
@@ -166,7 +174,7 @@ class AzerosModel(nn.Module):
         llm = AutoModelForCausalLM.from_pretrained(
             self.config.llm,
             attn_implementation=self.attn_implementation,
-            torch_dtype=torch.float16
+            dtype=torch.float16
         )
         self.llm.load_state_dict(llm.state_dict(), strict=True)
 
@@ -175,14 +183,14 @@ class AzerosModel(nn.Module):
             [self.speech_encoder, self.paraling_encoder],
             [self.config.speech_encoder, self.config.paraling_encoder],
         ):
-            if config.model_type is None:
+            if config['model_type'] is None:
                 continue
-            elif "whisper" in config.model_type:
+            elif "whisper" in config['model_type']:
                 replace_whisper_encoder_forward() # this will handle when audio input is not 30s
-                speech_encoder = HFModel.from_pretrained(config.model_path).encoder
+                speech_encoder = HFModel.from_pretrained(config['model_path']).encoder
                 model.load_state_dict(speech_encoder.state_dict(), strict=True)
             else:
-                speech_encoder = AutoModel.from_pretrained(config.model_path).encoder
+                speech_encoder = AutoModel.from_pretrained(config['model_path'])
                 model.load_state_dict(speech_encoder.state_dict(), strict=True)
 
     def preprocess_text_and_audio(
@@ -195,8 +203,7 @@ class AzerosModel(nn.Module):
     ):
         """
         Combine the text messages with audio features. This is done by inserting audio tokens of the non-padded length
-        into the text messages, and then padding them.
-        Modified from
+        into the text messages, and then padding them. Modified from
         https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen2_audio/processing_qwen2_audio.py.
         """
         placeholder = DEFAULT_PLACE_HOLDER
@@ -220,20 +227,18 @@ class AzerosModel(nn.Module):
         # step 1: expand all the audio tokens to their target length
         for message in messages:
             expanded_audio_tokens = []
-            if isinstance(message, list):
-                message = self.tokenizer.apply_chat_template(
-                    message,
-                    tokenize=False,
-                    chat_template=CHAT_TEMPLATE if fix_chat_template else None,
-                    add_generation_prompt=add_generation_prompt,
-                    padding='do_not_pad',
-                    truncation=False,
-                )
-            else:
-                assert isinstance(message, str), message
+            assert isinstance(message, list), message
+            message = self.tokenizer.apply_chat_template(
+                message,
+                tokenize=False,
+                chat_template=CHAT_TEMPLATE if fix_chat_template else None,
+                add_generation_prompt=add_generation_prompt,
+                padding='do_not_pad',
+                truncation=False,
+            )
 
-            # NOTE: since the responses were truncated at 256 tokens,
-            # we have to do the same truncation here to avoid UNEXPECTED <endoftext> tokens 
+            # NOTE: since the pre-generated responses were truncated at 256 tokens,
+            # we have to do roughly the same truncation here to avoid UNEXPECTED <im_end> tokens 
             _tokens = self.tokenizer.encode(message, add_special_tokens=False)
             message = self.tokenizer.decode(_tokens[:256])
 
@@ -326,15 +331,15 @@ class AzerosModel(nn.Module):
             x_lens,
             self.speech_encoder,
             self.speech_encoder_projector,
-            self.config.speech_encoder.model_type,
+            self.config.speech_encoder['model_type'],
         )
-        if self.config.paraling_encoder.model_type is not None:
+        if self.config.paraling_encoder['model_type'] is not None:
             paraling_outs, paraling_lens = self.forward_speech_encoder(
                 x,
                 x_lens,
                 self.paraling_encoder,
                 self.paraling_encoder_projector,
-                self.config.paraling_encoder.model_type,
+                self.config.paraling_encoder['model_type'],
             )
             # merge two encoders as interleaved audio tokens
             B, L1, D = encoder_outs.shape
@@ -395,7 +400,7 @@ class AzerosModel(nn.Module):
             x, x_lens = self.speech_encoder.extract_feature(input)
             x = x.to(self.llm.device)
             x_lens = x_lens.to(self.llm.device)
-        elif 'whisper' in self.config.speech_encoder.model_type:
+        elif 'whisper' in self.config.speech_encoder['model_type']:
             from whisper import log_mel_spectrogram
             import numpy as np
             x_lens = [wav.shape[0] // 160 for wav in input]

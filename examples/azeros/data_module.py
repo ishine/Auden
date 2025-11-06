@@ -9,14 +9,10 @@ example lhotse MonoCut with LLM response:
     supervisions=[SupervisionSegment(id='utt_0001', recording_id='rec_0001',
     start=0.0, duration=3.21, channel=0, text='你好，世界！', language='zh',
     speaker=None, gender='female', custom={'age': 'fourties', 'emotion': 'happy',
-    'response': '你好！很高兴见到你！🌍', 'task': 'response_free'}, alignment=None)], features=None,
+    'response': '你好！很高兴见到你！🌍', 'instruction': ''}, alignment=None)], features=None,
     recording=Recording(id='rec_0001', sources=[AudioSource(type='file', channels=[0],
     source='/path/to/dummy.wav')], sampling_rate=16000, num_samples=51360,
     duration=3.21, channel_ids=[0], transforms=None), custom=None)
-
-Notes:
-- Responses were generated from different instructions, which can be
-  distinguished from `task` with pre-defined choices.
 """
 
 import logging
@@ -88,34 +84,17 @@ class Speech2ResponseDataset(torch.utils.data.Dataset):
         infos: List[Dict[str, Union[str, List[str]]]] = []
         for sequence_idx, cut in enumerate(cuts):
             supervision = cut.supervisions[0]
-            source_text = supervision.text
-            source_language = getattr(supervision, "language", None)
-            task = getattr(supervision, 'task', 'asr_naive')
-            if task == 'asr_naive':
-                target_text = source_text
-                target_prompt = np.random.choice(self.asr_prompts(source_language))
-            elif task == 'age_naive':
-                target_text = getattr(supervision, 'age_group', supervision.age)
-                target_prompt = np.random.choice(self.age_templates)
-            elif task == 'gender_naive':
-                target_text = supervision.gender
-                target_prompt = np.random.choice(self.gender_templates)
-            elif task == 'emotion_naive':
-                target_text = supervision.emotion
-                target_prompt = np.random.choice(self.emotion_templates)
-            elif task == 'response_free':
-                target_text = supervision.response
-                target_prompt = ""
-            elif task == 'response_caption':
-                target_text = supervision.response
-                target_prompt = self.caption_prompt(source_language)
+            if not hasattr(supervision, 'response'):
+                response = supervision.text
+                instruction = 'Repeat the above texts.'
             else:
-                raise ValueError(f"Unsupported task = '{task}'")
+                response = supervision.response
+                instruction = getattr(supervision, 'instruction', '')
 
             infos.append(
                 {
-                    "target_text": target_text,
-                    "target_prompt": target_prompt
+                    "response": response,
+                    "instruction": instruction
                 }
             )
 
@@ -131,39 +110,6 @@ class Speech2ResponseDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         return 0
-
-    def caption_prompt(self, lang=None):
-        if lang == 'zh':
-            return '描述你听到的所有信息。'
-        else:
-            return 'Describe all information you can hear.',
-
-    def asr_prompts(self, lang=None):
-        if lang == 'zh':
-            return '请重复以上内容。'
-        else:
-            return 'Please repeat the above content.',
-
-    @cache
-    @property
-    def age_templates(self):
-        with open('configs/prompts/age.yaml') as f:
-            templates = yaml.load(f, Loader=yaml.FullLoader)
-        return templates
-
-    @cache
-    @property
-    def gender_templates(self):
-        with open('configs/prompts/gender.yaml') as f:
-            templates = yaml.load(f, Loader=yaml.FullLoader)
-        return templates
-
-    @cache
-    @property
-    def emotion_templates(self):
-        with open('configs/prompts/emotion.yaml') as f:
-            templates = yaml.load(f, Loader=yaml.FullLoader)
-        return templates
 
 
 class AzerosDatamodule(BaseLhotseDatamodule):
@@ -213,6 +159,7 @@ class AzerosDatamodule(BaseLhotseDatamodule):
         cutset = cutset.filter(remove_short_and_long_utt)
         cutset = cutset.map(remove_multiple_supervisions)
         if self.cfg.text_normalization:
+            # recommed no text normalization for LLM responses
             cutset = cutset.map(text_normalization_on_cut)
         cutset = cutset.filter(cleanup_utt_with_wrong_text)
 
@@ -236,7 +183,7 @@ class AzerosDatamodule(BaseLhotseDatamodule):
             )
             hours = train_set.get("hours", 1.0)
             weight = train_set.get("weights", 1)
-            lang = train_set.get("lang", "zh")
+            lang = train_set.get("lang", None)
             if self.cfg.get("use_infinite_dataset", True):
                 cutset = cutset.repeat()
             else:
@@ -325,7 +272,7 @@ class AzerosDatamodule(BaseLhotseDatamodule):
             valid_sampler = DynamicBucketingSampler(
                 cutset,
                 max_duration=self.cfg.sampler.max_duration,
-                max_duration=(self.cfg.sampler, 'max_cuts', None),
+                max_cuts=getattr(self.cfg.sampler, 'max_cuts', None),
                 shuffle=False,
             )
             valid_dl = DataLoader(

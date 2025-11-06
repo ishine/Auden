@@ -16,14 +16,15 @@ class AzerosTrainer(BaseTrainer):
         feature_lens = supervisions["num_frames"].to(device)
 
         # Extract required texts and optional languages from supervisions
-        target_texts = supervisions.get("target_text")
-        target_prompts = supervisions.get("target_prompt", None)
-        audio_token = getattr(self.model, 'module', self.model).audio_token_wrapped
+        responses = supervisions.get("response")
+        instructions = supervisions.get("instruction")
+        audio_token_wrapped = getattr(self.model, 'module', self.model).audio_token_wrapped
 
         messages = []
-        for prompt, response in zip(target_prompts, target_texts):
+        for instruction, response in zip(instructions, responses):
             msg = [
-                {"role": "user", "content": f"{audio_token} {prompt}"},
+                {"role": "user",
+                 "content": f"{audio_token_wrapped} {instruction}".strip()},
                 {"role": "assistant", "content": f"{response}"},
             ]
             messages.append(msg)

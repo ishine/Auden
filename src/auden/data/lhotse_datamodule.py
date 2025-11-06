@@ -272,7 +272,7 @@ class BaseLhotseDatamodule(ABC):
             train_sampler = DynamicBucketingSampler(
                 train_cutset,
                 max_duration=self.cfg.sampler.max_duration,
-                max_duration=(self.cfg.sampler, 'max_cuts', None),
+                max_cuts=getattr(self.cfg.sampler, 'max_cuts', None),
                 shuffle=self.cfg.sampler.shuffle,
                 num_buckets=self.cfg.sampler.num_buckets,
                 buffer_size=self.cfg.sampler.num_buckets * 2000,
@@ -284,7 +284,6 @@ class BaseLhotseDatamodule(ABC):
             train_sampler = SimpleCutSampler(
                 train_cutset,
                 max_duration=self.cfg.sampler.max_duration,
-                max_duration=(self.cfg.sampler, 'max_cuts', None),
                 max_cuts=getattr(self.cfg.sampler, "max_cuts", None),
                 shuffle=self.cfg.sampler.shuffle,
             )
