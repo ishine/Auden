@@ -11,21 +11,57 @@ import os
 import hydra
 import torch
 import torch.distributed as dist
-from omegaconf import DictConfig
 
 # Import local modules directly
 from data_module import VoiceDatamodule
-from trainer import VoiceTrainer
 from model import VoiceMultitaskModel
 from model_config import VoiceMultitaskConfig
+from omegaconf import DictConfig, OmegaConf
+from trainer import VoiceTrainer
+
+from auden.auto.auto_config import AutoConfig  # Only for encoder config
 
 # Import utility functions
-from auden.models.audio_tag.utils import load_id2label
-from auden.auto.auto_config import AutoConfig  # Only for encoder config
+from auden.auto.auto_model import AutoModel
+from auden.models.audio_tag.utils import load_id2label, save_id2label
+
+
+def load_pretrained_encoder(cfg: DictConfig):
+    """load pretrained encoder config and module.
+    If pretrained_encoder is provided, load config from there.
+    Otherwise, build an empty encoder config from the encoder type.
+
+    Args:
+        cfg: The model section, e.g. ``cfg.model`` with fields:
+             - encoder: string identifier (e.g., "zipformer")
+             - pretrained_encoder: optional path/identifier
+
+    Returns:
+        (encoder_config, pretrained_encoder)
+    """
+    if cfg.get("pretrained_encoder") is not None:
+        try:
+            pretrained_encoder = AutoModel.from_pretrained(cfg.pretrained_encoder)
+            encoder_config = pretrained_encoder.config
+            logging.info(f"Loaded pretrained encoder from {cfg.pretrained_encoder}")
+            return encoder_config, pretrained_encoder
+        except Exception:
+            raise ValueError(f"Failed to load encoder from {cfg.pretrained_encoder}")
+    else:
+        try:
+            encoder_config = AutoConfig.for_model(cfg.encoder)
+            logging.info(f"Built encoder config for {cfg.encoder}")
+        except Exception:
+            raise ValueError(f"Failed to build encoder config for {cfg.encoder}")
+        pretrained_encoder = None
+        return encoder_config, pretrained_encoder
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="train")
 def main(cfg: DictConfig):
+
+    # Log full config for reproducibility (align style with tta)
+    logging.info("\n" + OmegaConf.to_yaml(cfg))
 
     # DDP environment setup
     rank = int(os.environ.get("RANK", 0))
@@ -39,24 +75,7 @@ def main(cfg: DictConfig):
     if cfg.get("exp_dir"):
         os.makedirs(cfg.exp_dir, exist_ok=True)
 
-    # Load encoder config
-    # Priority 1: If pretrained_encoder is provided, load config from there
-    if hasattr(cfg.model, 'pretrained_encoder') and cfg.model.pretrained_encoder:
-        encoder_config = AutoConfig.from_pretrained(cfg.model.pretrained_encoder)
-        if rank == 0:
-            logging.info(f"Loading encoder config from pretrained: {cfg.model.pretrained_encoder}")
-    # Priority 2: If encoder is provided, try to load from path or model type
-    elif hasattr(cfg.model, 'encoder') and cfg.model.encoder:
-        try:
-            encoder_config = AutoConfig.from_pretrained(cfg.model.encoder)
-        except Exception:
-            # If path doesn't work, treat as model type
-            encoder_config = AutoConfig.for_model(cfg.model.encoder)
-    # Priority 3: Default to small zipformer
-    else:
-        encoder_config = AutoConfig.for_model("zipformer")
-        if rank == 0:
-            logging.info("Using default small zipformer encoder (emb_dim=512)")
+    encoder_config, pretrained_encoder = load_pretrained_encoder(cfg.model)
 
     # Load all id2label mappings for 4 tasks
     id2label_id = load_id2label(cfg.model.id2label_json_id)
@@ -75,87 +94,26 @@ def main(cfg: DictConfig):
     )
 
     # Load pretrained encoder weights if provided
-    if hasattr(cfg.model, 'pretrained_encoder') and cfg.model.pretrained_encoder:
-        pretrained_path = cfg.model.pretrained_encoder
-        
-        # If directory, find the weight file
-        if os.path.isdir(pretrained_path):
-            # Try common weight file names in order of preference
-            candidate_files = [
-                "pretrained.pt",
-                "model.pt", 
-                "pytorch_model.bin",
-                "model.safetensors",
-                "pretrained.safetensors"
-            ]
-            
-            weight_file = None
-            for fname in candidate_files:
-                fpath = os.path.join(pretrained_path, fname)
-                if os.path.exists(fpath):
-                    weight_file = fpath
-                    break
-            
-            if weight_file is None:
-                raise FileNotFoundError(
-                    f"Could not find pretrained weights in {pretrained_path}. "
-                    f"Expected one of: {candidate_files}"
-                )
-            pretrained_path = weight_file
-        
-        if rank == 0:
-            logging.info(f"Loading pretrained encoder from: {pretrained_path}")
-        
-        # Load weights based on file extension
-        if pretrained_path.endswith('.safetensors'):
-            # Load safetensors format
-            try:
-                from safetensors.torch import load_file
-                pretrained_state = load_file(pretrained_path)
-            except ImportError:
-                raise ImportError(
-                    "safetensors is required to load .safetensors files. "
-                    "Install with: pip install safetensors"
-                )
-        else:
-            # Load PyTorch format (.pt, .bin, etc.)
-            pretrained_state = torch.load(pretrained_path, map_location="cpu")
-        
-        # Filter encoder weights only (keys starting with "encoder.")
-        encoder_state = {
-            k.replace("encoder.", "", 1): v 
-            for k, v in pretrained_state.items() 
-            if k.startswith("encoder.")
-        }
-        
-        # If no "encoder." prefix found, assume all weights are encoder weights
-        if not encoder_state:
-            encoder_state = pretrained_state
-        
-        # Load into model's encoder
-        missing_keys, unexpected_keys = model.encoder.load_state_dict(
-            encoder_state, strict=False
+    if pretrained_encoder is not None:
+        model.encoder.load_state_dict(pretrained_encoder.state_dict(), strict=True)
+        logging.info(
+            f"Loaded pretrained encoder weights from {cfg.model.pretrained_encoder}"
         )
-        
-        if rank == 0:
-            if missing_keys:
-                logging.warning(f"Missing keys when loading encoder: {missing_keys[:5]}...")
-            if unexpected_keys:
-                logging.warning(f"Unexpected keys when loading encoder: {unexpected_keys[:5]}...")
-            logging.info("Pretrained encoder loaded successfully!")
 
+    # Optionally freeze encoder
+    if cfg.model.get("freeze_encoder"):
+        for p in model.encoder.parameters():
+            p.requires_grad = False
+        num_params = sum(p.numel() for p in model.encoder.parameters()) / 1e6
+        logging.info(f"[voice.train] Froze encoder weights ({num_params:.2f} M params)")
+
+    # Save config and id2label
     if rank == 0:
         config.save_pretrained(cfg.exp_dir)
-        
-        # Save each id2label to separate files
-        import json
-        from pathlib import Path
-        
-        exp_dir = Path(cfg.exp_dir)
-        json.dump(id2label_id, open(exp_dir / "id2label_id.json", "w"), ensure_ascii=False, indent=2)
-        json.dump(id2label_emotion, open(exp_dir / "id2label_emotion.json", "w"), ensure_ascii=False, indent=2)
-        json.dump(id2label_gender, open(exp_dir / "id2label_gender.json", "w"), ensure_ascii=False, indent=2)
-        json.dump(id2label_age, open(exp_dir / "id2label_age.json", "w"), ensure_ascii=False, indent=2)
+        save_id2label(id2label_id, cfg.exp_dir, name="id2label_id.json")
+        save_id2label(id2label_emotion, cfg.exp_dir, name="id2label_emotion.json")
+        save_id2label(id2label_gender, cfg.exp_dir, name="id2label_gender.json")
+        save_id2label(id2label_age, cfg.exp_dir, name="id2label_age.json")
 
     # Datamodule
     data_module = VoiceDatamodule(cfg.data)
@@ -172,4 +130,3 @@ def main(cfg: DictConfig):
 
 if __name__ == "__main__":
     main()
-

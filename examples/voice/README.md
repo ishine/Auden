@@ -159,10 +159,15 @@ Cosine similarity: 0.7234
 Same speaker: ✅ YES
 ```
 
-## Performance of the Pretrained Auden-Voice Encoder
+## Usage of the Pretrained Auden-Voice Encoder
 Model: https://huggingface.co/AudenAI/auden-encoder-voice
 
+```
+from auden.auto.auto_model import AutoModel
+encoder = AutoModel.from_pretrained("AudenAI/auden-encoder-voice")
+```
 
+### Performance
 | Task - Dataset   | Metric (deault Acc)  |
 |----------|--------|
 | Speaker Identification - Vox2  | 95.25 % |

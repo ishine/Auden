@@ -4,8 +4,9 @@ hydra:
     dir: ${exp_dir}/logs/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
 model:
-  encoder: zipformer  # path or model_type for AutoConfig (optional if pretrained_encoder is set)
-  pretrained_encoder: null  # path to pretrained encoder (loads config + weights)
+  pretrained_encoder: AudenAI/auden-encoder-voice  # path to pretrained encoder (loads config + weights)
+  encoder: zipformer  # path or model_type for AutoConfig (used if pretrained_encoder is not set)
+  freeze_encoder: False  # True to freeze encoder weights
   id2label_json_id: configs/id2label_id.json
   id2label_json_emotion: configs/id2label_emotion.json
   id2label_json_gender: configs/id2label_gender.json
