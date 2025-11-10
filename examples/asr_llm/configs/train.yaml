@@ -15,7 +15,7 @@ model:
     use_flash_attn: False
     frozen: True
   audio_token: <|AUDIO|> 
-  encoder_projector_ds_rate: 4 # 4 * 4 = 16 for zipformer and 2 * 8 = 16 for others; i.e. 100hz fbank --> 6.25Hz LLM input token
+  audio_encoder_projector_ds_rate: 4 # 4 * 4 = 16 for zipformer and 2 * 8 = 16 for others; i.e. 100hz fbank --> 6.25Hz LLM input token
   tag_audio_boundary: False
   exclude_from_checkpoint: null
 
