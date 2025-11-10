@@ -150,7 +150,7 @@ def main(cfg: DictConfig):
 
             messages = [
                 [
-                    {"role": "user", "content": f"{model.audio_token} {instruction}"},
+                    {"role": "user", "content": f"{model.audio_token_wrapped} {instruction}"},
                 ] for instruction in batch["supervisions"]["instruction"]
             ]
             hyps = model.generate((feature, feature_lens), messages, **generate_config)

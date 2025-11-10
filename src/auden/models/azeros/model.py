@@ -3,10 +3,8 @@ from __future__ import annotations
 import os
 from typing import List, Dict, Union, Optional
 
-import k2
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from transformers import AutoModel as HFModel
 from transformers import AutoTokenizer as HFTokenizer
 from transformers import AutoModelForCausalLM
@@ -126,7 +124,7 @@ class AzerosModel(nn.Module):
             self.llm = AutoModelForCausalLM.from_config(
                 self.config.llm_config,
                 attn_implementation=self.attn_implementation,
-                dtype=torch.float16
+                torch_dtype=torch.float16
             )
 
         self.speech_encoder, self.speech_encoder_projector = self.set_speech_encoder(
@@ -174,7 +172,7 @@ class AzerosModel(nn.Module):
         llm = AutoModelForCausalLM.from_pretrained(
             self.config.llm,
             attn_implementation=self.attn_implementation,
-            dtype=torch.float16
+            torch_dtype=torch.float16
         )
         self.llm.load_state_dict(llm.state_dict(), strict=True)
 
@@ -192,6 +190,11 @@ class AzerosModel(nn.Module):
             else:
                 speech_encoder = AutoModel.from_pretrained(config['model_path'])
                 model.load_state_dict(speech_encoder.state_dict(), strict=True)
+
+        # (3) for optional pretrained model
+        if self.config.get('pretrained_model'):
+            pretrained = torch.load(self.config.get('pretrained_model'))
+            self.load_state_dict(pretrained, strict=False)
 
     def preprocess_text_and_audio(
         self,
@@ -305,9 +308,9 @@ class AzerosModel(nn.Module):
             x = x.transpose(1, 2) # (N, C, T)
             x = x[:, :, :3000]
             encoder_outs = model(x)[0]
-            # (choice 1) fix length as 30s with no padding mask
+            # # (choice 1) fix length as 30s with no padding mask
             # feature_lens = torch.ones_like(x_lens) * 1500
-            # # (choice 2) use the actual length with padding masked
+            # (choice 2) use the actual length with padding mask (recommend)
             feature_lens = ((x_lens - 1) // 2 + 1)
             feature_lens = torch.where(feature_lens > 1500, 1500, feature_lens)
             encoder_outs = encoder_outs[:, :feature_lens.max()]
@@ -420,7 +423,6 @@ class AzerosModel(nn.Module):
             max_length=None,
             is_training=False,
         )
-        # self.show_features(inputs_embeds)
 
         generated_ids = self.llm.generate(
             # input_ids=input_ids,
@@ -429,7 +431,7 @@ class AzerosModel(nn.Module):
             bos_token_id=self.llm.config.bos_token_id,
             eos_token_id=self.llm.config.eos_token_id,
             pad_token_id=self.pad_token_id,
-            **kwargs
+            **kwargs,
         )
         response = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
         return response

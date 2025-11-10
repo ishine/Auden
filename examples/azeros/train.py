@@ -68,11 +68,14 @@ def main(cfg: DictConfig):
         config.save_pretrained(cfg.exp_dir)
         tokenizer.save_pretrained(cfg.exp_dir)
 
-    # freeze LLM
+    # freeze LLM and other optional modules
     for p in model.llm.parameters():
         p.requires_grad = False
     if cfg.model.speech_encoder.get("frozen"):
         for p in model.speech_encoder.parameters():
+            p.requires_grad = False
+    if cfg.model.speech_encoder_projector.get("frozen"):
+        for p in model.speech_encoder_projector.parameters():
             p.requires_grad = False
     if hasattr(cfg.model, 'paraling_encoder') and cfg.model.paraling_encoder.get("frozen"):
         for p in model.paraling_encoder.parameters():

@@ -7,20 +7,22 @@ model:
   model_type: azeros
   speech_encoder:
     model_type: zipformer
-    model_path: ./myfolder/zipformer/pretrained_tta_encoder.pt # AudenAI/auden-encoder-tta-m10
+    model_path: AudenAI/auden-encoder-tta-m10
     frozen: true
   speech_encoder_projector:
     projector_type: encoder_projector
-    projector_ds_rate: 4
+    projector_ds_rate: 4  # 25hz / 4 -> 6.25hz
+    frozen: false
   paraling_encoder:
     model_type: zipformer
-    model_path: ./myfolder/zipformer/pretrained_voice_encoder.pt # AudenAI/auden-encoder-voice
+    model_path: AudenAI/auden-encoder-voice
     frozen: true
   paraling_encoder_projector:
     projector_type: encoder_projector
     projector_ds_rate: 4
   llm: Qwen/Qwen2.5-7B-Instruct
   use_flash_attn: false
+  pretrained_model: null  # param initialization
 
 trainer:
   optimizer:
@@ -42,7 +44,7 @@ trainer:
   log_interval: 50
   average_period: 200
   reset_interval: 200
-  valid_interval: 4000
+  valid_interval: 2000
   save_every_n: 5
   use_fp16: true
   tensorboard: true
