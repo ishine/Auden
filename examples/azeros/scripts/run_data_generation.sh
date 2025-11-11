@@ -20,8 +20,4 @@ done
 
 wait
 
-for i in $outdir/*; do
-    echo combine $i
-    lhotse combine $i/${mode}_*.jsonl.gz $i.jsonl.gz
-    rm -f $i/${mode}_*.jsonl.gz
-done
+# use `lhotse combine $outdir/xxx/${mode}_*.jsonl.gz xxx.jsonl.gz` to combine all shards

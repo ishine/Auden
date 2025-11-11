@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from typing import List, Dict, Union, Optional
 
 import torch
@@ -84,18 +85,20 @@ class AzerosModel(nn.Module):
             if isinstance(state_obj, dict) and "state_dict" in state_obj
             else state_obj
         )
-
         model.load_state_dict(state_dict, strict=strict)
+
+        # load excluded submodules saved separately under model_dir
+        for module_name in ('llm', 'speech_encoder', 'speech_encoder_projector',
+                            'paraling_encoder', 'paraling_encoder_projector'):
+            subdir = os.path.join(model_dir, module_name)
+            if os.path.isdir(subdir):
+                module_type = type(getattr(model, module_name))
+                loaded_module = module_type.from_pretrained(subdir).state_dict()
+                getattr(model, module_name).load_state_dict(loaded_module, strict=True)
+                logging.info(f"Load {module_name} from {subdir}")
+
         model.eval()
         return model
-
-    def train(self, mode=True):
-        # keep llm and speech_encoder in eval-mode during training
-        super().train(mode=mode)
-        self.llm.eval()
-        self.speech_encoder.eval()
-        if self.paraling_encoder is not None:
-            self.paraling_encoder.eval()
 
     def __init__(self, config, tokenizer):
         super().__init__()
@@ -129,27 +132,28 @@ class AzerosModel(nn.Module):
 
         self.speech_encoder, self.speech_encoder_projector = self.set_speech_encoder(
             config.speech_encoder_config,
-            config.speech_encoder_projector,
+            config.speech_encoder_projector_ds_rate,
         )
         self.paraling_encoder, self.paraling_encoder_projector = self.set_speech_encoder(
             config.paraling_encoder_config,
-            config.paraling_encoder_projector,
+            config.paraling_encoder_projector_ds_rate,
         )
-        if self.paraling_encoder_projector is not None:
+        if self.paraling_encoder is not None:
             self.audio_token_wrapped = f"<audio><meta>{self.audio_token}</meta><text>{self.audio_token}</text></audio>"
 
-        self.load_pretrained_modules()
+        # optional pretrained model
+        if self.config.get('pretrained_model'):
+            pretrained = torch.load(self.config.get('pretrained_model'))
+            self.load_state_dict(pretrained, strict=False)
 
-    def set_speech_encoder(self, config, projector):
+    def set_speech_encoder(self, config, downsample_rate):
         if config is None:
-            return nn.Identity(), None
+            return None, None
         model_type = config.model_type
         if "whisper" in model_type:
-            # from accelerate import init_empty_weights
-            # with init_empty_weights(): # this will cause error when pytorch < 2.4
             replace_whisper_encoder_forward() # this will handle when audio input is not 30s
             from transformers.modeling_utils import no_init_weights
-            with no_init_weights(): # this won't do any random weights initialization to save time
+            with no_init_weights():
                 speech_model = HFModel.from_config(config)
             speech_encoder = speech_model.encoder
             speech_encoder_dim = config.d_model
@@ -157,44 +161,12 @@ class AzerosModel(nn.Module):
             speech_encoder = AutoModel.from_config(config)
             speech_encoder_dim = speech_encoder.encoder_out_dim
 
-        if projector['projector_type'] == 'encoder_projector':
-            encoder_projector = EncoderProjector(
-                speech_encoder_dim,
-                self.llm.config.hidden_size,
-                projector['projector_ds_rate']
-            )
-        else:
-            raise ValueError(f"Unsupported projector = {projector['projector_type']}")
-        return speech_encoder, encoder_projector
-
-    def load_pretrained_modules(self):
-        # (1) for LLM
-        llm = AutoModelForCausalLM.from_pretrained(
-            self.config.llm,
-            attn_implementation=self.attn_implementation,
-            torch_dtype=torch.float16
+        encoder_projector = EncoderProjector(
+            speech_encoder_dim,
+            self.llm.config.hidden_size,
+            downsample_rate
         )
-        self.llm.load_state_dict(llm.state_dict(), strict=True)
-
-        # (2) for speech encoders
-        for model, config in zip(
-            [self.speech_encoder, self.paraling_encoder],
-            [self.config.speech_encoder, self.config.paraling_encoder],
-        ):
-            if config['model_type'] is None:
-                continue
-            elif "whisper" in config['model_type']:
-                replace_whisper_encoder_forward() # this will handle when audio input is not 30s
-                speech_encoder = HFModel.from_pretrained(config['model_path']).encoder
-                model.load_state_dict(speech_encoder.state_dict(), strict=True)
-            else:
-                speech_encoder = AutoModel.from_pretrained(config['model_path'])
-                model.load_state_dict(speech_encoder.state_dict(), strict=True)
-
-        # (3) for optional pretrained model
-        if self.config.get('pretrained_model'):
-            pretrained = torch.load(self.config.get('pretrained_model'))
-            self.load_state_dict(pretrained, strict=False)
+        return speech_encoder, encoder_projector
 
     def preprocess_text_and_audio(
         self,
@@ -334,15 +306,15 @@ class AzerosModel(nn.Module):
             x_lens,
             self.speech_encoder,
             self.speech_encoder_projector,
-            self.config.speech_encoder['model_type'],
+            self.config.speech_encoder_config.model_type,
         )
-        if self.config.paraling_encoder['model_type'] is not None:
+        if self.paraling_encoder is not None:
             paraling_outs, paraling_lens = self.forward_speech_encoder(
                 x,
                 x_lens,
                 self.paraling_encoder,
                 self.paraling_encoder_projector,
-                self.config.paraling_encoder['model_type'],
+                self.config.paraling_encoder_config.model_type,
             )
             # merge two encoders as interleaved audio tokens
             B, L1, D = encoder_outs.shape

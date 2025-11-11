@@ -7,20 +7,22 @@ model:
   model_type: azeros
   speech_encoder:
     model_type: zipformer
-    model_path: AudenAI/auden-encoder-tta-m10
+    pretrained_model: AudenAI/auden-encoder-tta-m10
     frozen: true
   speech_encoder_projector:
-    projector_type: encoder_projector
-    projector_ds_rate: 4  # 25hz / 4 -> 6.25hz
+    ds_rate: 4  # 25hz / 4 -> 6.25hz
     frozen: false
   paraling_encoder:
     model_type: zipformer
-    model_path: AudenAI/auden-encoder-voice
+    pretrained_model: AudenAI/auden-encoder-voice
     frozen: true
   paraling_encoder_projector:
-    projector_type: encoder_projector
-    projector_ds_rate: 4
-  llm: Qwen/Qwen2.5-7B-Instruct
+    ds_rate: 4
+    frozen: false
+  llm:
+    model_type: qwen2
+    pretrained_model: Qwen/Qwen2.5-7B-Instruct
+    frozen: true
   use_flash_attn: false
   pretrained_model: null  # param initialization
 
