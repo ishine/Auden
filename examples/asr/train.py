@@ -20,7 +20,7 @@ Typical usage:
 Config expectations (subset):
 - ``cfg.model.model_type``: model class key for ``AutoConfig.for_model``.
 - ``cfg.model.encoder``: encoder path_or_name for ``AutoConfig.from_pretrained``.
-- ``cfg.tokenizer``: tokenizer id or path for ``AutoTokenizer.from_pretrained``.
+- ``cfg.tokenizer``: tokenizer id or path for HF ``AutoTokenizer.from_pretrained``.
 - ``cfg.data``: datamodule configuration (see ``AsrDatamodule`` and base datamodule).
 - ``cfg.exp_dir``: experiment output directory (config/tokenizer will be saved here).
 """
@@ -36,10 +36,10 @@ from data_module import AsrDatamodule
 from lhotse.utils import fix_random_seed
 from omegaconf import DictConfig, OmegaConf
 from trainer import AsrTrainer
+from transformers import AutoTokenizer
 
 from auden.auto.auto_config import AutoConfig
 from auden.auto.auto_model import AutoModel
-from auden.auto.auto_tokenizer import AutoTokenizer
 
 
 def load_pretrained_encoder(cfg: DictConfig):
@@ -106,6 +106,12 @@ def main(cfg: DictConfig):
     config = AutoConfig.for_model(cfg.model.model_type, encoder_config=encoder_config)
     tokenizer = AutoTokenizer.from_pretrained(cfg.tokenizer)
     model = AutoModel.from_config(config, tokenizer)
+
+    if pretrained_encoder is not None:
+        model.encoder.load_state_dict(pretrained_encoder.state_dict(), strict=True)
+        logging.info(
+            f"Loaded pretrained encoder from {cfg.model.encoder.pretrained_encoder}"
+        )
 
     if rank == 0:
         config.save_pretrained(cfg.exp_dir)

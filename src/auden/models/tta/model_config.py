@@ -13,7 +13,6 @@ class TtaConfig(BaseConfig):
         self,
         speech_encoder_config=None,
         text_encoder_config=None,
-        special_tokens=None,
         decoder_dim: int = 512,
         context_size: int = 2,
         joiner_dim: int = 512,
@@ -40,7 +39,6 @@ class TtaConfig(BaseConfig):
                 text_encoder_config = HFConfig.for_model(**text_encoder_config)
         self.text_encoder_config = text_encoder_config
 
-        self.special_tokens = special_tokens
         self.decoder_dim = decoder_dim
         self.context_size = context_size
         self.joiner_dim = joiner_dim
