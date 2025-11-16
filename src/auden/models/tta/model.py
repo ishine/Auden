@@ -18,12 +18,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers import AutoModel as HFModel
-from transformers import AutoTokenizer as HFTokenizer
+from transformers import AutoTokenizer
 
 from ...auto.auto_config import AutoConfig
 from ...auto.auto_model import AutoModel
-from ...auto.auto_tokenizer import AutoTokenizer
-from ..asr.utils import add_sos
+from ..asr.utils import add_sos, drop_leading_bar
 from ..zipformer.utils.padding import make_pad_mask
 from ..zipformer.utils.scaling import ScaledLinear
 from .asr_decoder.attention_decoder import AttentionDecoderModel
@@ -69,7 +68,9 @@ class TtaModel(nn.Module):
 
         text_tok_dir = Path(model_dir) / "text_tokenizer"
         text_tokenizer = (
-            HFTokenizer.from_pretrained(text_tok_dir) if text_tok_dir.exists() else None
+            AutoTokenizer.from_pretrained(text_tok_dir)
+            if text_tok_dir.exists()
+            else None
         )
 
         model = cls(config, asr_tokenizer, text_tokenizer=text_tokenizer)
@@ -101,23 +102,21 @@ class TtaModel(nn.Module):
         super().__init__()
         self.config = config
         self.asr_tokenizer = asr_tokenizer
-        self.blank_id = self.asr_tokenizer.blank_id
+        self.blank_id = self.asr_tokenizer.pad_token_id
         self.vocab_size = self.asr_tokenizer.vocab_size
+        self.attn_vocab_size = len(
+            self.asr_tokenizer
+        )  # this is the total vocab size, including special tokens
         self.speech_encoder_config = config.speech_encoder_config
         self.speech_encoder_out_dim = max(config.speech_encoder_config.encoder_dim)
         self.speech_encoder = AutoModel.from_config(self.config.speech_encoder_config)
 
-        self.special_tokens = config.special_tokens
-        if self.special_tokens is not None:
-            self.special_to_id = {
-                spec: self.vocab_size + i for i, spec in enumerate(self.special_tokens)
-            }
-            self.id_to_special = {
-                self.vocab_size + i: spec for i, spec in enumerate(self.special_tokens)
-            }
-            self.attn_vocab_size = self.vocab_size + len(self.special_tokens)
-        else:
-            self.attn_vocab_size = self.vocab_size
+        self.special_tokens = self.asr_tokenizer.all_special_tokens
+        self.special_to_id = {
+            tok: self.asr_tokenizer.convert_tokens_to_ids(tok)
+            for tok in self.special_tokens
+        }
+        self.id_to_special = {v: k for k, v in self.special_to_id.items()}
 
         # RNNT branch
         self.decoder = Decoder(
@@ -224,7 +223,7 @@ class TtaModel(nn.Module):
         lm = self.simple_lm_proj(decoder_out)
         am = self.simple_am_proj(encoder_out)
 
-        with torch.amp.autocast('cuda', enabled=False):
+        with torch.amp.autocast("cuda", enabled=False):
             simple_loss, (px_grad, py_grad) = k2.rnnt_loss_smoothed(
                 lm=lm.float(),
                 am=am.float(),
@@ -258,7 +257,7 @@ class TtaModel(nn.Module):
         # prior to do_rnnt_pruning (this is an optimization for speed).
         logits = self.joiner(am_pruned, lm_pruned, project_input=False)
 
-        with torch.amp.autocast('cuda', enabled=False):
+        with torch.amp.autocast("cuda", enabled=False):
             pruned_loss = k2.rnnt_loss_pruned(
                 logits=logits.float(),
                 symbols=y_padded,
@@ -350,6 +349,7 @@ class TtaModel(nn.Module):
         lm_scale: float = 0.0,
         forward_attention_decoder: bool = True,
         forward_s2t_alignment: bool = True,
+        should_drop_leading_bar: bool = True,
     ) -> Tuple[torch.Tensor | None, ...]:
         """Training forward supporting RNNT, attention decoder, and s2t alignment.
 
@@ -368,7 +368,9 @@ class TtaModel(nn.Module):
         encoder_out_lens = encoder_output.encoder_out_lens
 
         # RNNT branch (ASR)
-        y_list = self.asr_tokenizer.encode(source_texts)
+        y_list = self.asr_tokenizer(source_texts)
+        if should_drop_leading_bar:
+            y_list = drop_leading_bar(y_list)
         y = k2.RaggedTensor(y_list).to(device)
         row_splits = y.shape.row_splits(1)
         y_lens = row_splits[1:] - row_splits[:-1]
@@ -385,7 +387,9 @@ class TtaModel(nn.Module):
 
         # Attention decoder branch (ASR/AST)
         if forward_attention_decoder:
-            y_target_list = self.asr_tokenizer.encode(target_texts)
+            y_target_list = self.asr_tokenizer(target_texts)
+            if should_drop_leading_bar:
+                y_target_list = drop_leading_bar(y_target_list)
             y_target = k2.RaggedTensor(y_target_list).to(device)
             row_splits = y_target.shape.row_splits(1)
             y_target_lens = row_splits[1:] - row_splits[:-1]
@@ -460,7 +464,7 @@ class TtaModel(nn.Module):
         self,
         input,
         *,
-        task: str,
+        task: str = "transcribe",
         beam_size: int = 1,
         blank_penalty: float = 0,
         source_language: List[str] | None = None,
@@ -505,7 +509,7 @@ class TtaModel(nn.Module):
                 return_timestamps=return_timestamps,
             )
             hyp_tokens = decoding_results.hyps
-            hyps = self.asr_tokenizer.decode(hyp_tokens)
+            hyps = self.asr_tokenizer.batch_decode(hyp_tokens, skip_special_tokens=True)
             resp: dict = {"hypotheses": hyps}
             if return_timestamps:
                 resp["timestamps"] = decoding_results.timestamps
@@ -545,7 +549,7 @@ class TtaModel(nn.Module):
                 beam_size=beam_size,
             )
             hyp_tokens = decoding_results.hyps
-            hyps = self.asr_tokenizer.decode(hyp_tokens, skip_bos_eos=True)
+            hyps = self.asr_tokenizer.batch_decode(hyp_tokens, skip_special_tokens=True)
             source_language = [
                 self.id_to_special[id] for id in decoding_results.source_language
             ]

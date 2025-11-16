@@ -18,11 +18,10 @@ from data_module import TtaDatamodule
 from omegaconf import DictConfig, OmegaConf
 from trainer import TtaTrainer as Trainer
 from transformers import AutoConfig as HFConfig
-from transformers import AutoTokenizer as HFTokenizer
+from transformers import AutoTokenizer
 
 from auden.auto.auto_config import AutoConfig
 from auden.auto.auto_model import AutoModel
-from auden.auto.auto_tokenizer import AutoTokenizer
 
 
 def load_pretrained_speech_encoder(cfg: DictConfig):
@@ -86,14 +85,14 @@ def load_pretrained_text_encoder(cfg: DictConfig):
     if pretrained:
         encoder_model = HFModel.from_pretrained(pretrained)
         encoder_config = encoder_model.config
-        tokenizer = HFTokenizer.from_pretrained(pretrained)
+        tokenizer = AutoTokenizer.from_pretrained(pretrained)
         return encoder_config, encoder_model, tokenizer
 
     # 2) Empty-by-type via AutoConfig.from_pretrained when model_type is an identifier
     encoder_model = None
     # Treat model_type as a full identifier for AutoConfig/tokenizer
     encoder_config = HFConfig.from_pretrained(model_type)
-    tokenizer = HFTokenizer.from_pretrained(model_type)
+    tokenizer = AutoTokenizer.from_pretrained(model_type)
     return encoder_config, encoder_model, tokenizer
 
 
@@ -122,18 +121,17 @@ def main(cfg: DictConfig):
         load_pretrained_text_encoder(cfg.model.text_encoder)
     )
 
-    special_tokens = [str(x) for x in cfg.model.get("special_tokens", [])]
-    if special_tokens:
-        logging.info(f"Using {len(special_tokens)} special tokens: {special_tokens}")
-
     config = AutoConfig.for_model(
         cfg.model.model_type,
         speech_encoder_config=speech_encoder_config,
         text_encoder_config=text_encoder_config,
-        special_tokens=special_tokens,
     )
 
+    special_tokens = [str(x) for x in cfg.model.get("special_tokens", [])]
+    if special_tokens:
+        logging.info(f"Using {len(special_tokens)} special tokens: {special_tokens}")
     asr_tokenizer = AutoTokenizer.from_pretrained(cfg.tokenizer)
+    asr_tokenizer.add_special_tokens({"additional_special_tokens": special_tokens})
 
     model = AutoModel.from_config(
         config=config,

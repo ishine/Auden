@@ -85,16 +85,6 @@ config = AutoConfig.from_pretrained("path/to/config.json")
 config = AutoConfig.for_model("zipformer", hidden_size=512)
 ```
 
-### Loading Tokenizers
-
-```python
-from auden.auto import AutoTokenizer
-
-# Load tokenizer
-tokenizer = AutoTokenizer.from_pretrained("your-org/tokenizer")
-tokenizer = AutoTokenizer.from_pretrained("path/to/tokenizer")
-```
-
 ## Examples
 
 Check [examples/](examples/) for task-specific tutorials.
