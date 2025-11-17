@@ -13,8 +13,12 @@ from transformers.trainer_pt_utils import LabelSmoother
 
 from ...auto.auto_config import AutoConfig
 from ...auto.auto_model import AutoModel
-from .model_config import AudioLLMConfig
-from .utils import preprocess_text_and_audio_impl, replace_whisper_encoder_forward
+from .model_config import LalmConfig
+from .utils import (
+    preprocess_text_and_audio_impl,
+    preprocess_text_and_audio_packed_sdpa,
+    replace_whisper_encoder_forward,
+)
 
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index
 
@@ -49,14 +53,15 @@ class EncoderProjector(nn.Module):
         return x
 
 
-class AudioLLMModel(nn.Module):
+class LalmModel(nn.Module):
     @classmethod
     def from_pretrained(
         cls,
         model_path: str,
         *,
         map_location: str | torch.device = "cpu",
-    ) -> "AudioLLMModel":
+        llm_dtype: torch.dtype | str | None = torch.float16,
+    ) -> "LalmModel":
         # Support HF Hub repo IDs
         if not os.path.exists(model_path):
             model_path = AutoModel._download_from_hub(model_path)
@@ -80,8 +85,8 @@ class AudioLLMModel(nn.Module):
         config = AutoConfig.from_pretrained(model_dir)
         tokenizer = HFTokenizer.from_pretrained(model_dir, use_fast=False)
 
-        # Instantiate model skeleton
-        model = cls(config, tokenizer)
+        # Instantiate model skeleton, allowing caller to control LLM dtype
+        model = cls(config, tokenizer, llm_dtype=llm_dtype)
 
         # Load composite weights if present (may exclude some modules)
         if weight_path and os.path.exists(weight_path):
@@ -124,11 +129,11 @@ class AudioLLMModel(nn.Module):
                     ae = ZipformerEncoderModel.from_pretrained(audio_subdir)
                     model.audio_encoder.load_state_dict(ae.state_dict(), strict=True)
                 logging.info(
-                    f"[audio_llm.from_pretrained] Loaded audio encoder from {audio_subdir}"
+                    f"[lalm.from_pretrained] Loaded audio encoder from {audio_subdir}"
                 )
             except Exception as e:
                 logging.warning(
-                    f"[audio_llm.from_pretrained] Failed to load audio encoder from {audio_subdir}: {e}"
+                    f"[lalm.from_pretrained] Failed to load audio encoder from {audio_subdir}: {e}"
                 )
 
         # 2) LLM (full HF model dir)
@@ -137,15 +142,13 @@ class AudioLLMModel(nn.Module):
             try:
                 loaded_llm = AutoModelForCausalLM.from_pretrained(
                     llm_subdir,
-                    torch_dtype=torch.float16,
+                    torch_dtype=model.llm_dtype,
                 )
                 model.llm = loaded_llm
-                logging.info(
-                    f"[audio_llm.from_pretrained] Loaded LLM from {llm_subdir}"
-                )
+                logging.info(f"[lalm.from_pretrained] Loaded LLM from {llm_subdir}")
             except Exception as e:
                 logging.warning(
-                    f"[audio_llm.from_pretrained] Failed to load LLM from {llm_subdir}: {e}"
+                    f"[lalm.from_pretrained] Failed to load LLM from {llm_subdir}: {e}"
                 )
 
         model.eval()
@@ -153,8 +156,9 @@ class AudioLLMModel(nn.Module):
 
     def __init__(
         self,
-        config: AudioLLMConfig,
+        config: LalmConfig,
         tokenizer,
+        llm_dtype: torch.dtype | str | None = torch.float16,
     ) -> None:
         super().__init__()
         self.config = config
@@ -164,6 +168,26 @@ class AudioLLMModel(nn.Module):
         self.use_flash_attn = config.use_flash_attn
         self.audio_encoder_type = self.audio_encoder_config.model_type
         assert self.audio_encoder_type in ["zipformer", "whisper"]
+
+        # Decide LLM dtype (default: float16). Accept both torch.dtype and common string aliases.
+        if isinstance(llm_dtype, str):
+            name = llm_dtype.lower()
+            if name in ("float16", "fp16", "half"):
+                self.llm_dtype: torch.dtype = torch.float16
+            elif name in ("bfloat16", "bf16"):
+                self.llm_dtype = torch.bfloat16
+            elif name in ("float32", "fp32"):
+                self.llm_dtype = torch.float32
+            else:
+                logging.warning(
+                    f"[LalmModel] Unknown llm_dtype='{llm_dtype}', defaulting to float16."
+                )
+                self.llm_dtype = torch.float16
+        elif isinstance(llm_dtype, torch.dtype):
+            self.llm_dtype = llm_dtype
+        else:
+            # None or unsupported type → default to float16
+            self.llm_dtype = torch.float16
 
         self.exclude_from_checkpoint = config.exclude_from_checkpoint
         if self.exclude_from_checkpoint:
@@ -192,7 +216,7 @@ class AudioLLMModel(nn.Module):
             self.llm = AutoModelForCausalLM.from_config(
                 self.config.llm_config,
                 attn_implementation=attn_impl,
-                torch_dtype=torch.float16,
+                torch_dtype=self.llm_dtype,
             )
 
         # 3) Projector
@@ -203,7 +227,7 @@ class AudioLLMModel(nn.Module):
         )
         if self.config.tag_audio_boundary:
             self.audio_tag_embedding = nn.Parameter(
-                torch.zeros((2, self.llm.config.hidden_size), dtype=torch.float32)
+                torch.zeros((2, self.llm.config.hidden_size), dtype=self.llm_dtype)
             )
 
     def forward_audio_features(self, x: torch.Tensor, x_lens: torch.Tensor):
@@ -216,7 +240,7 @@ class AudioLLMModel(nn.Module):
             encoder_outs = encoder_output.encoder_out
             feature_lens = encoder_output.encoder_out_lens
 
-        audio_features = self.encoder_projector(encoder_outs).to(torch.float16)
+        audio_features = self.encoder_projector(encoder_outs).to(self.llm_dtype)
         feature_lens = feature_lens // self.config.audio_encoder_projector_ds_rate
         return audio_features, feature_lens
 
@@ -225,10 +249,27 @@ class AudioLLMModel(nn.Module):
         messages: List[List[Dict[str, str]]],
         audio_features: Optional[torch.Tensor],
         audio_feature_lens: Optional[torch.Tensor],
-        max_length: int = 128,
+        max_length: int = 256,
         tag_audio_boundary: bool = False,
         is_training: bool = False,
+        pack_sequences: bool = True,
+        max_total_length: Optional[int] = None,
     ):
+        # Choose preprocessing path: packed (isolated) or original
+        if pack_sequences and not self.use_flash_attn:
+            return preprocess_text_and_audio_packed_sdpa(
+                messages=messages,
+                tokenizer=self.tokenizer,
+                llm=self.llm,
+                audio_token=self.config.audio_token,
+                audio_features=audio_features,
+                audio_feature_lens=audio_feature_lens,
+                max_length=max_length,
+                is_training=is_training,
+                chat_template=CHAT_TEMPLATE,
+                max_total_length=max_total_length,
+            )
+        # Original implementation
         return preprocess_text_and_audio_impl(
             messages=messages,
             tokenizer=self.tokenizer,
@@ -248,10 +289,12 @@ class AudioLLMModel(nn.Module):
         x: torch.Tensor,
         x_lens: torch.Tensor,
         messages: List[List[Dict[str, str]]],
-        max_length: int = 256,
+        max_length: Optional[int] = None,
+        pack_sequences: bool = True,
+        max_total_length: Optional[int] = None,
     ):
         audio_features, feature_lens = self.forward_audio_features(x, x_lens)
-        input_ids, inputs_embeds, attention_mask, labels = (
+        input_ids, inputs_embeds, attention_mask, labels, position_ids = (
             self.preprocess_text_and_audio(
                 messages,
                 audio_features=audio_features,
@@ -259,19 +302,28 @@ class AudioLLMModel(nn.Module):
                 max_length=max_length,
                 is_training=True,
                 tag_audio_boundary=self.config.tag_audio_boundary,
+                pack_sequences=pack_sequences,
+                max_total_length=max_total_length,
             )
         )
         outputs = self.llm(
-            inputs_embeds=inputs_embeds, attention_mask=attention_mask, labels=labels
+            inputs_embeds=inputs_embeds,
+            attention_mask=attention_mask,
+            labels=labels,
+            position_ids=position_ids,
         )
         with torch.no_grad():
             preds = torch.argmax(outputs.logits, -1)
             acc = compute_accuracy(
-                preds[:, :-1], labels[:, 1:], ignore_label=IGNORE_TOKEN_ID
+                preds[:, :-1],
+                labels[:, 1:],
+                ignore_label=IGNORE_TOKEN_ID,
             )
         return outputs, acc
 
-    def generate(self, input, messages, max_length=512, **kwargs):
+    def generate(
+        self, input, messages, max_length=None, pack_sequences=False, **kwargs
+    ):
         if input is not None:
             if isinstance(input, tuple) and len(input) == 2:
                 x, x_lens = input
@@ -281,13 +333,16 @@ class AudioLLMModel(nn.Module):
 
         # enforce left padding for batched generation
         self.tokenizer.padding_side = "left"
-        input_ids, inputs_embeds, attention_mask, _ = self.preprocess_text_and_audio(
+        max_total_length = getattr(self.config, "max_total_length", None)
+        input_ids, inputs_embeds, attention_mask, _, _ = self.preprocess_text_and_audio(
             messages,
             audio_features=audio_features,
             audio_feature_lens=feature_lens,
             max_length=max_length,
             is_training=False,
             tag_audio_boundary=self.config.tag_audio_boundary,
+            pack_sequences=pack_sequences,
+            max_total_length=max_total_length,
         )
         generated_ids = self.llm.generate(
             inputs_embeds=inputs_embeds,
@@ -302,7 +357,9 @@ class AudioLLMModel(nn.Module):
 
 
 def compute_accuracy(
-    pad_outputs: torch.Tensor, pad_targets: torch.Tensor, ignore_label: int
+    pad_outputs: torch.Tensor,
+    pad_targets: torch.Tensor,
+    ignore_label: int,
 ):
     mask = pad_targets != ignore_label
     numerator = torch.sum(

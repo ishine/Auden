@@ -7,10 +7,10 @@ from ...auto.auto_config import AutoConfig
 from ..base.model_config import BaseConfig
 
 
-class AudioLLMConfig(BaseConfig):
-    """Configuration for Audio-LLM model."""
+class LalmConfig(BaseConfig):
+    """Configuration for Large Audio-Language Model (LALM)."""
 
-    model_type: str = "audio-llm"
+    model_type: str = "lalm"
 
     def __init__(
         self,

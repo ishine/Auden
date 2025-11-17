@@ -20,7 +20,7 @@ class AsrLLMTrainer(BaseTrainer):
         with open(prompt_file, "r", encoding="utf-8") as f:
             self.prompt_list = [line.strip() for line in f if line.strip()]
 
-    def _forward_one_batch(self, batch: dict, is_training: bool, return_emb=False):
+    def _forward_one_batch(self, batch: dict, is_training: bool):
         device = self.device
         feature = batch["inputs"]
         # at entry, feature is (N, T, C)
@@ -46,6 +46,7 @@ class AsrLLMTrainer(BaseTrainer):
                 x=feature,
                 x_lens=feature_lens,
                 messages=messages,
+                pack_sequences=False,
             )
             loss = model_outputs.loss
 

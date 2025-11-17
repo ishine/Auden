@@ -24,7 +24,7 @@ MODEL_MAPPING_NAMES: "OrderedDict[str, tuple[str, str]]" = OrderedDict(
         ("audio-tag", ("auden.models.audio_tag.model", "AudioTagModel")),
         ("clap", ("auden.models.clap.model", "ClapModel")),
         ("audio-caption", ("auden.models.audio_caption.model", "AudioCaptionModel")),
-        ("audio-llm", ("auden.models.audio_llm.model", "AudioLLMModel")),
+        ("lalm", ("auden.models.lalm.model", "LalmModel")),
         ("tta", ("auden.models.tta.model", "TtaModel")),
     ]
 )
