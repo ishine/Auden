@@ -144,7 +144,7 @@ def preprocess_text_and_audio_impl(
     audio_token: str,
     audio_features: Optional[torch.Tensor],  # [B, T, H] after projector
     audio_feature_lens: Optional[torch.Tensor],  # [B]
-    max_length: int = 128,
+    max_length: int = 256,
     tag_audio_boundary: bool = False,
     is_training: bool = False,
     audio_tag_embedding: Optional[torch.Tensor] = None,  # [2, H]
@@ -298,5 +298,210 @@ def preprocess_text_and_audio_impl(
         labels = None
 
     attention_mask = (~padding_mask).to(input_embeds.dtype)
+    position_ids = None  # will be derived from input_embeds
+    return input_ids, input_embeds, attention_mask, labels, position_ids
 
-    return input_ids, input_embeds, attention_mask, labels
+
+def preprocess_text_and_audio_packed_sdpa(
+    *,
+    messages: List[List[Dict[str, str]]],
+    tokenizer,
+    llm,
+    audio_token: str,
+    audio_features: Optional[torch.Tensor],  # [B, T, H] after projector
+    audio_feature_lens: Optional[torch.Tensor],  # [B]
+    max_length: Optional[int] = None,
+    is_training: bool = False,
+    chat_template: Optional[str] = None,
+    max_total_length: Optional[int] = None,
+):
+    """
+    Sequence packing variant: concatenate all samples in the batch into a single
+    long sequence without padding. Prevents per-sample padding overhead.
+
+    Note: This does not add a block-diagonal attention mask; as in standard LM
+    packing, tokens can attend across sample boundaries. If strict isolation is
+    required, a 4D block mask would be needed and supported by specific models.
+    """
+
+    batch_size = len(messages)
+    if max_total_length is not None and max_total_length <= 0:
+        raise ValueError("max_total_length must be a positive integer when provided.")
+
+    audio_token_id = tokenizer.convert_tokens_to_ids(audio_token)
+    if audio_token_id is None or audio_token_id < 0:
+        raise ValueError(
+            f"audio_token '{audio_token}' is not in the tokenizer vocabulary."
+        )
+
+    add_generation_prompt = not is_training
+
+    # Prepare audio features and lengths (assume provided)
+    device = audio_features.device
+
+    # Build chat strings via template, then batch tokenize (no padding requested)
+    texts: List[str] = []
+    for msg in messages:
+        try:
+            s = tokenizer.apply_chat_template(
+                msg,
+                tokenize=False,
+                chat_template=chat_template,
+                add_generation_prompt=add_generation_prompt,
+                padding="do_not_pad",
+                truncation=False,
+                max_length=max_length,
+            )
+        except Exception:
+            s = "".join([f"{turn['role']}\n{turn['content']}\n" for turn in msg])
+        texts.append(s)
+    tok = tokenizer(
+        texts,
+        add_special_tokens=False,
+        padding=False,
+        truncation=False,
+        return_tensors=None,
+    )
+    ids_lists = tok.input_ids
+
+    # Compute per-sample text embeddings without padding by flattening then slicing
+    lens = [len(x) for x in ids_lists]
+    flat_ids = torch.tensor(
+        [t for seq in ids_lists for t in seq], dtype=torch.long, device=device
+    )
+    if flat_ids.numel() > 0:
+        flat_embeds = llm.get_input_embeddings()(flat_ids)  # [Ltot, H]
+    else:
+        H = llm.get_input_embeddings().weight.size(1)
+        flat_embeds = torch.empty(
+            (0, H), device=device, dtype=llm.get_input_embeddings().weight.dtype
+        )
+    # Build per-sample views
+    text_embeds_full = []
+    offset = 0
+    for ln in lens:
+        text_embeds_full.append(flat_embeds[offset : offset + ln])
+        offset += ln
+    out_embeds: List[torch.Tensor] = []
+    out_ids: List[torch.Tensor] = []
+    total_tokens = 0
+
+    for i in range(batch_size):
+        cur_ids = torch.tensor(ids_lists[i], dtype=torch.long, device=device)
+        # find first audio token position
+        audio_pos = (cur_ids == audio_token_id).nonzero(as_tuple=False).squeeze(-1)
+        if audio_pos.numel() > 0:
+            k = int(audio_pos[0].item())
+            left_ids = cur_ids[:k]
+            right_ids = cur_ids[k + 1 :]
+            emb_i = text_embeds_full[i]
+            left_emb = emb_i[:k]
+            right_emb = emb_i[k + 1 : len(cur_ids)]
+        else:
+            left_ids = cur_ids
+            right_ids = cur_ids.new_empty((0,))
+            emb_i = text_embeds_full[i]
+            left_emb = emb_i[: len(cur_ids)]
+            right_emb = emb_i[: len(cur_ids)][0:0]
+
+        L_audio = int(audio_feature_lens[i].item())
+        audio_emb = audio_features[i, :L_audio]
+        mid_ids = torch.full(
+            (L_audio,), audio_token_id, dtype=left_ids.dtype, device=left_ids.device
+        )
+
+        out_ids_i = torch.cat([left_ids, mid_ids, right_ids], dim=0)
+        embeds = torch.cat([left_emb, audio_emb, right_emb], dim=0)
+
+        out_ids.append(out_ids_i)
+        out_embeds.append(embeds)
+
+        total_tokens += out_ids_i.size(0)
+        if max_total_length is not None and total_tokens > max_total_length:
+            overflow = total_tokens - max_total_length
+            logging.warning(
+                "Packed token count %d exceeds max_total_length=%d; truncating last "
+                "segment by %d tokens to stay within limits.",
+                total_tokens,
+                max_total_length,
+                overflow,
+            )
+            keep = out_ids_i.size(0) - overflow
+            if keep <= 0:
+                out_ids.pop()
+                out_embeds.pop()
+            else:
+                out_ids[-1] = out_ids[-1][:keep]
+                out_embeds[-1] = out_embeds[-1][:keep]
+            total_tokens = max_total_length
+            break
+
+    # Concatenate across samples (packed)
+    input_embeds = torch.cat(out_embeds, dim=0).unsqueeze(0)  # [1, L, H]
+    input_ids = torch.cat(out_ids, dim=0).unsqueeze(0)  # [1, L]
+    # Always build block-diagonal causal mask for isolation across packed samples.
+    L = input_ids.size(1)
+    # start with all disallowed; keep dtype consistent with model embeddings
+    mask = torch.full(
+        (L, L),
+        float("-inf"),
+        device=device,
+        dtype=input_embeds.dtype,
+    )
+    # mark segment boundaries
+    seg_lens = [t.size(0) for t in out_embeds]
+    starts = []
+    s = 0
+    for ln in seg_lens:
+        starts.append(s)
+        s += ln
+    # within each block, allow only causal (lower-triangular including diag)
+    for st, ln in zip(starts, seg_lens):
+        ed = st + ln
+        block = mask[st:ed, st:ed]
+        lower = torch.tril(torch.ones((ln, ln), device=device), diagonal=0).bool()
+        block[lower] = 0.0
+    attention_mask = mask.unsqueeze(0).unsqueeze(
+        0
+    )  # [1, 1, L, L], additive mask (0 allow, -inf disallow)
+    # Labels consistent with preprocess_text_and_audio_impl, but applied per segment
+    if is_training:
+        labels = input_ids.clone().to(torch.long)
+        try:
+            assistant_token_id = tokenizer.convert_tokens_to_ids("assistant")
+            im_start_id = tokenizer.convert_tokens_to_ids("<|im_start|>")
+            if (
+                assistant_token_id is not None
+                and assistant_token_id != tokenizer.unk_token_id
+                and im_start_id is not None
+            ):
+                # compute segment starts/lens if not present
+                seg_lens = [t.size(0) for t in out_embeds]
+                starts = []
+                s = 0
+                for ln in seg_lens:
+                    starts.append(s)
+                    s += ln
+                row = input_ids[0]
+                for st, ln in zip(starts, seg_lens):
+                    ed = st + ln
+                    seg = row[st:ed]
+                    cols = (
+                        (seg == assistant_token_id).nonzero(as_tuple=False).squeeze(-1)
+                    )
+                    for c_rel in cols.tolist():
+                        if c_rel > 0 and seg[c_rel - 1].item() == im_start_id:
+                            c_abs = st + c_rel
+                            labels[0, st : c_abs + 2] = IGNORE_TOKEN_ID
+        except Exception:
+            pass
+    else:
+        labels = None
+
+    # Build per-token position_ids resetting at each segment boundary
+    seg_lens = [t.size(0) for t in out_embeds]
+    pos_list = [torch.arange(ln, device=device, dtype=torch.long) for ln in seg_lens]
+    position_ids = (
+        torch.cat(pos_list, dim=0).unsqueeze(0) if len(pos_list) > 0 else None
+    )
+    return input_ids, input_embeds, attention_mask, labels, position_ids

@@ -24,7 +24,7 @@ CONFIG_MAPPING_NAMES: "OrderedDict[str, tuple[str, str]]" = OrderedDict(
             "audio-caption",
             ("auden.models.audio_caption.model_config", "AudioCaptionConfig"),
         ),
-        ("audio-llm", ("auden.models.audio_llm.model_config", "AudioLLMConfig")),
+        ("lalm", ("auden.models.lalm.model_config", "LalmConfig")),
         ("tta", ("auden.models.tta.model_config", "TtaConfig")),
     ]
 )
