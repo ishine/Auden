@@ -3,9 +3,6 @@ from __future__ import annotations
 import os
 from typing import Tuple, Optional, Union, Generator
 
-import sys
-sys.path.append('./myfolder/CosyVoice')
-sys.path.append('./myfolder/Matcha-TTS')
 from cosyvoice.cli.cosyvoice import CosyVoice2
 from cosyvoice.utils.file_utils import load_wav
 
@@ -32,14 +29,11 @@ CHAT_TEMPLATE = """{% for message in messages -%}
 
 
 class ModelService:
-    def __init__(self):
-        model_ckpt = "./exp/stage2/pretrained.pt"
-        self.speech_llm = AutoModel.from_pretrained(model_ckpt, strict=False)
+    def __init__(self, args):
+        self.tts_model = CosyVoice2(args.cosyvoice_path, load_jit=False, load_trt=False, load_vllm=False, fp16=False)
+        self.speech_llm = AutoModel.from_pretrained(args.model_path, strict=False)
         self.device = torch.device("cuda", 0) if torch.cuda.is_available() else torch.device("cpu")
-        if hasattr(self.speech_llm, 'audio_token_wrapped'):
-            self.audio_token_wrapped = self.speech_llm.audio_token_wrapped
-        else: # for old versions, adjust it as needed
-            self.audio_token_wrapped = f"<audio>{self.speech_llm.audio_token}</audio>"
+        self.audio_token_wrapped = self.speech_llm.audio_token_wrapped
         self.audio_sr = 16000
         self.speech_llm.tokenizer.padding_side = "left"
         self.speech_llm.to(self.device)
@@ -53,8 +47,7 @@ class ModelService:
             "top_p": None,
             "top_k": None,
         }
-        self.tts_model = CosyVoice2('./myfolder/CosyVoice2-0.5B', load_jit=False, load_trt=False, load_vllm=False, fp16=False)
-        self.prompt_speech_16k = load_wav('./assets/zero_shot_prompt.wav', 16000)
+        self.prompt_speech_16k = load_wav(args.zeroshot_prompt, 16000)
         self.out_sr = self.tts_model.sample_rate
 
     def load_audio_mono(self, path: str, target_sr: int = 16000) -> Tuple[np.ndarray, int]:
@@ -156,10 +149,12 @@ class ModelService:
 
 # Singleton for the app
 model_service: Optional[ModelService] = None
+args: Optional[argparse.Namespace] = None
 def get_service() -> ModelService:
     global model_service
+    global args
     if model_service is None:
-        model_service = ModelService()
+        model_service = ModelService(args=args)
     return model_service
 
 
@@ -335,7 +330,21 @@ with gr.Blocks(theme=gr.themes.Soft(primary_hue="blue")) as demo:
 
 
 if __name__ == "__main__":
-    server_name = os.getenv("GRADIO_SERVER_NAME", "0.0.0.0")
-    port = int(os.getenv("PORT", "8080"))
-    share = os.getenv("GRADIO_SHARE", "0").lower() in ("1", "true", "yes")
-    demo.queue(max_size=64).launch(server_name=server_name, server_port=port, share=share)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--server-name", default='0.0.0.0', type=str, help='Gradio server_name')
+    parser.add_argument("--server-port", default='8080', type=int, help='Gradio server_port')
+    parser.add_argument("--share", action='store_true', help='Gradio share')
+    parser.add_argument("--model-path", default='exp/stage2/pretrained.pt',
+                        type=str, help='Path to AZeroS model')
+    parser.add_argument("--cosyvoice-path", default='myfolder/CosyVoice2-0.5B',
+                        type=str, help='Path to CosyVoice')
+    parser.add_argument("--zeroshot-prompt", default='assets/zero_shot_prompt.wav',
+                        type=str, help='Audio file as zero-shot prompt')
+    args = parser.parse_args()
+
+    demo.queue(max_size=64).launch(
+        server_name=args.server_name,
+        server_port=args.server_port,
+        share=args.share
+    )
