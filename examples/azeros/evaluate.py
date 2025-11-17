@@ -148,6 +148,7 @@ def main(cfg: DictConfig):
             feature = batch["inputs"].to(device)
             feature_lens = batch["supervisions"]["num_frames"].to(device)
 
+            # change this for other purposes
             messages = [
                 [
                     {"role": "user", "content": f"{model.audio_token_wrapped} {instruction}"},

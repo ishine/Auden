@@ -2,6 +2,8 @@
 # - name: test
 #   manifest: /abs/path/to/test_cuts.jsonl.gz
 #   lang: zh
-#   task: asr_naive
 
-
+# Example:
+- name: aishell1-test
+  manifest: configs/manifests/aishell1_naive_asr.jsonl.gz
+  lang: zh

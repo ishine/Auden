@@ -141,11 +141,6 @@ class AzerosModel(nn.Module):
         if self.paraling_encoder is not None:
             self.audio_token_wrapped = f"<audio><meta>{self.audio_token}</meta><text>{self.audio_token}</text></audio>"
 
-        # optional pretrained model
-        if self.config.get('pretrained_model'):
-            pretrained = torch.load(self.config.get('pretrained_model'))
-            self.load_state_dict(pretrained, strict=False)
-
     def set_speech_encoder(self, config, downsample_rate):
         if config is None:
             return None, None

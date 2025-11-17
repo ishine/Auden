@@ -19,9 +19,7 @@ import logging
 from collections import defaultdict
 from functools import partial
 from typing import Dict, List, Union
-from functools import cache
 
-import numpy as np
 import torch
 import yaml
 from lhotse import CutSet, set_audio_duration_mismatch_tolerance
@@ -30,7 +28,6 @@ from lhotse.workarounds import Hdf5MemoryIssueFix
 from torch.utils.data import DataLoader
 
 from auden.data.lhotse_datamodule import BaseLhotseDatamodule, _SeedWorkers
-from auden.utils.text_normalization import text_normalization
 
 
 class Speech2ResponseDataset(torch.utils.data.Dataset):
@@ -84,12 +81,8 @@ class Speech2ResponseDataset(torch.utils.data.Dataset):
         infos: List[Dict[str, Union[str, List[str]]]] = []
         for sequence_idx, cut in enumerate(cuts):
             supervision = cut.supervisions[0]
-            if not hasattr(supervision, 'response'):
-                response = supervision.text
-                instruction = 'Repeat the above texts.'
-            else:
-                response = supervision.response
-                instruction = getattr(supervision, 'instruction', '')
+            response = supervision.response
+            instruction = supervision.instruction
 
             infos.append(
                 {
@@ -125,18 +118,6 @@ class AzerosDatamodule(BaseLhotseDatamodule):
         super().__init__(cfg)
 
     def _filter_cutset(self, cutset, split="train"):
-        def text_normalization_on_cut(c):
-            text = c.supervisions[0].text
-            text = text_normalization(
-                text,
-                case="lower",
-                space_between_cjk=False,
-                remove_diacritics=False,
-                remove_symbols=False,
-            )
-            c.supervisions[0].text = text
-            return c
-
         def remove_short_and_long_utt(c):
             # Keep only utterances with duration between 1 second and 30 seconds
             if c.duration < 1.0 or c.duration > 30.0:
@@ -158,9 +139,6 @@ class AzerosDatamodule(BaseLhotseDatamodule):
 
         cutset = cutset.filter(remove_short_and_long_utt)
         cutset = cutset.map(remove_multiple_supervisions)
-        if self.cfg.text_normalization:
-            # recommed no text normalization for LLM responses
-            cutset = cutset.map(text_normalization_on_cut)
         cutset = cutset.filter(cleanup_utt_with_wrong_text)
 
         if self.cfg.get("pad_to_30s", False):

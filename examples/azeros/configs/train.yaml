@@ -46,8 +46,8 @@ trainer:
   log_interval: 50
   average_period: 200
   reset_interval: 200
-  valid_interval: 2000
-  save_every_n: 5
+  valid_interval: 10000
+  save_every_n: 1
   use_fp16: true
   tensorboard: true
 
@@ -70,4 +70,3 @@ data:
     max_cuts: 4
     shuffle: true
     drop_last: true
-  text_normalization: false

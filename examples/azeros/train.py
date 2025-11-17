@@ -132,18 +132,22 @@ def main(cfg: DictConfig):
         tokenizer.padding_side = "right"
 
     frozen_modules = []
+    exclude_from_checkpoint = []
     if cfg.model.llm.frozen:
         frozen_modules.append('llm')
+        exclude_from_checkpoint.append('llm')
     if cfg.model.speech_encoder.frozen:
         frozen_modules.append('speech_encoder')
+        exclude_from_checkpoint.append('speech_encoder')
     if cfg.model.speech_encoder_projector.frozen:
         frozen_modules.append('speech_encoder_projector')
     if cfg.model.paraling_encoder.frozen:
         frozen_modules.append('paraling_encoder')
+        exclude_from_checkpoint.append('paraling_encoder')
     if cfg.model.paraling_encoder_projector.frozen:
         frozen_modules.append('paraling_encoder_projector')
 
-    exclude_from_checkpoint = frozen_modules
+    logging.info(f"Modules to be frozen: {frozen_modules}")
     logging.info(f"Modules to be excluded from checkpoints: {exclude_from_checkpoint}")
 
     config = AutoConfig.for_model(
@@ -181,6 +185,10 @@ def main(cfg: DictConfig):
         src = cfg.model.paraling_encoder.get("pretrained_model")
         num_params = sum(p.numel() for p in model.paraling_encoder.parameters()) / 1e6
         logging.info(f"Load {num_params:.2f}M weights from {src} for paraling_encoder")
+    # optional pretrained model
+    if cfg.model.get('pretrained_model'):
+        pretrained = torch.load(cfg.model.get('pretrained_model'))
+        model.load_state_dict(pretrained, strict=False)
 
     # 6) save & freeze modules
     if rank == 0:
@@ -195,7 +203,6 @@ def main(cfg: DictConfig):
                 logging.info(f"Saved {module} to {save_path}")
             except:
                 logging.info(f"Failed to save {module}")
-
 
     # freeze modules
     for module in frozen_modules:

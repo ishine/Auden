@@ -1,8 +1,0 @@
-AUDENPATH=$(realpath $PWD/../../src)
-LHOTSEPATH=$(realpath $PWD)/myfolder/lhotse
-
-export PYTHONPATH=$AUDENPATH:$LHOTSEPATH:$PYTHONPATH
-
-export OMP_NUM_THREADS=8
-export HYDRA_FULL_ERROR=1
-export TOKENIZERS_PARALLELISM=false
