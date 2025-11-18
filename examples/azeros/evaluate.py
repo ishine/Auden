@@ -9,6 +9,7 @@ import hydra
 import torch
 import yaml
 from data_module import Speech2ResponseDataset
+from model import AzerosModel
 from lhotse import (
     CutSet, 
     Fbank, 
@@ -21,7 +22,6 @@ from lhotse.dataset import DynamicBucketingSampler, OnTheFlyFeatures
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 
-from auden.auto.auto_model import AutoModel
 from auden.utils.checkpoint import generate_model_checkpoint_from_trainer_checkpoints
 
 
@@ -117,7 +117,7 @@ def main(cfg: DictConfig):
             )
 
     # load model
-    model = AutoModel.from_pretrained(checkpoint_path, strict=False)
+    model = AzerosModel.from_pretrained(checkpoint_path, strict=False)
     device = (
         torch.device("cuda", 0) if torch.cuda.is_available() else torch.device("cpu")
     )

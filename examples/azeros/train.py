@@ -10,16 +10,16 @@ import os
 import hydra
 import torch
 import torch.distributed as dist
-from data_module import AzerosDatamodule
 from omegaconf import DictConfig, OmegaConf
-from trainer import AzerosTrainer as Trainer
+
 from transformers import AutoConfig as HFConfig
 from transformers import AutoTokenizer as HFTokenizer
 from transformers import AutoModelForCausalLM as HFCausalLM
 
-from auden.auto.auto_config import AutoConfig
-from auden.auto.auto_model import AutoModel
-
+from model import AzerosModel
+from model_config import AzerosConfig
+from data_module import AzerosDatamodule
+from trainer import AzerosTrainer as Trainer
 
 def load_pretrained_encoder(cfg):
     """Build encoder config and optionally load a pretrained module.
@@ -150,8 +150,7 @@ def main(cfg: DictConfig):
     logging.info(f"Modules to be frozen: {frozen_modules}")
     logging.info(f"Modules to be excluded from checkpoints: {exclude_from_checkpoint}")
 
-    config = AutoConfig.for_model(
-        cfg.model.model_type,
+    config = AzerosConfig(
         llm_config=llm_config,
         speech_encoder_config=speech_encoder_config,
         paraling_encoder_config=paraling_encoder_config,
@@ -160,10 +159,7 @@ def main(cfg: DictConfig):
         exclude_from_checkpoint=exclude_from_checkpoint
     )
 
-    model = AutoModel.from_config(
-        config=config,
-        tokenizer=tokenizer,
-    )
+    model = AzerosModel(config=config, tokenizer=tokenizer)
 
     # 5) Load pretrained components
     if pretrained_llm is not None:

@@ -11,13 +11,10 @@ from transformers import AutoTokenizer as HFTokenizer
 from transformers import AutoModelForCausalLM
 from transformers import AutoTokenizer as HFTokenizer
 from transformers.trainer_pt_utils import LabelSmoother
-from .projector.base_projector import EncoderProjector
-from .utils import (
-    replace_whisper_encoder_forward,
-    compute_accuracy,
-)
-from ...auto.auto_config import AutoConfig
-from ...auto.auto_model import AutoModel
+
+from auden.auto.auto_model import AutoModel
+from model_config import AzerosConfig
+from utils import replace_whisper_encoder_forward, compute_accuracy
 
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index
 DEFAULT_AUDIO_TOKEN = "<|AUDIO|>"
@@ -29,6 +26,31 @@ CHAT_TEMPLATE = """{% for message in messages -%}
 {% if add_generation_prompt -%}
 <|im_start|>assistant
 {% endif -%}"""
+
+
+class EncoderProjector(nn.Module):
+    def __init__(self, encoder_dim, llm_dim, downsample_rate):
+        super().__init__()
+        self.downsample_rate = downsample_rate
+        self.linear1 = nn.Linear(encoder_dim * self.downsample_rate, llm_dim)
+        self.relu = nn.ReLU()
+        self.linear2 = nn.Linear(llm_dim, llm_dim)
+
+    def forward(self, x, x_lens):
+        batch_size, seq_len, feat_dim = x.size()
+        num_frames_to_discard = seq_len % self.downsample_rate
+        if num_frames_to_discard > 0:
+            x = x[:, :-num_frames_to_discard, :]
+        seq_len = x.size(1)
+
+        x = x.contiguous().view(
+            batch_size, seq_len // self.downsample_rate, feat_dim * self.downsample_rate
+        )
+        x = self.linear1(x)
+        x = self.relu(x)
+        x = self.linear2(x)
+        return x, x_lens // self.downsample_rate
+
 
 class AzerosModel(nn.Module):
     @classmethod
@@ -62,7 +84,11 @@ class AzerosModel(nn.Module):
             model_dir, _ = os.path.split(model_path)
 
         # Load config and tokenizers
-        config = AutoConfig.from_pretrained(model_dir)
+        import json
+        config_path = os.path.join(model_dir, "config.json")
+        with open(config_path, "r") as f:
+            config_dict = json.load(f)
+        config = AzerosConfig(**config_dict)
         tokenizer = HFTokenizer.from_pretrained(model_dir)
 
         model = cls(config, tokenizer)

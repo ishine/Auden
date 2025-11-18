@@ -3,8 +3,8 @@ from __future__ import annotations
 from transformers import PretrainedConfig
 from transformers import AutoConfig as HFConfig
 
-from ...auto.auto_config import AutoConfig
-from ..base.model_config import BaseConfig
+from auden.auto.auto_config import AutoConfig
+from auden.models.base.model_config import BaseConfig
 
 def load_config(config):
     if config is None:
