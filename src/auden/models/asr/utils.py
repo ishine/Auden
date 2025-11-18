@@ -1,4 +1,11 @@
-import k2
+try:
+    import k2
+except Exception as e:
+    raise ImportError(
+        "k2 is required for RaggedTensor operations in ASR utilities. "
+        "Install via conda: `conda install -c k2-fsa k2` (ensure PyTorch/CUDA match), "
+        "or see https://k2-fsa.github.io/k2/."
+    ) from e
 import torch
 
 
@@ -96,3 +103,14 @@ def add_eos(ragged: k2.RaggedTensor, eos_id: int) -> k2.RaggedTensor:
 
     """
     return concat(ragged, eos_id, direction="right")
+
+
+def drop_leading_bar(ids_batch, tok):
+    "Remove leading '▁' at the beginning of the encoded sentence"
+    out = []
+    for ids in ids_batch:
+        toks = tok.convert_ids_to_tokens(ids)
+        if toks and (toks[0] == "▁" or toks[0].startswith("▁")):
+            ids = ids[1:]
+        out.append(ids)
+    return out

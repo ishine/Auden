@@ -20,7 +20,7 @@ Typical usage:
 Config expectations (subset):
 - ``cfg.model.model_type``: model class key for ``AutoConfig.for_model``.
 - ``cfg.model.encoder``: encoder path_or_name for ``AutoConfig.from_pretrained``.
-- ``cfg.tokenizer``: tokenizer id or path for ``AutoTokenizer.from_pretrained``.
+- ``cfg.tokenizer``: tokenizer id or path for HF ``AutoTokenizer.from_pretrained``.
 - ``cfg.data``: datamodule configuration (see ``AsrDatamodule`` and base datamodule).
 - ``cfg.exp_dir``: experiment output directory (config/tokenizer will be saved here).
 """
@@ -36,10 +36,29 @@ from data_module import AsrDatamodule
 from lhotse.utils import fix_random_seed
 from omegaconf import DictConfig, OmegaConf
 from trainer import AsrTrainer
+from transformers import AutoTokenizer
 
 from auden.auto.auto_config import AutoConfig
 from auden.auto.auto_model import AutoModel
-from auden.auto.auto_tokenizer import AutoTokenizer
+
+
+def load_pretrained_encoder(cfg: DictConfig):
+    """Load pretrained encoder module or build an empty encoder config."""
+    if cfg.get("model_type") == "zipformer":
+        from auden.models.zipformer.model import ZipformerEncoderModel
+        from auden.models.zipformer.model_config import ZipformerConfig
+
+        if cfg.get("pretrained_encoder") is not None:
+            pretrained_encoder = ZipformerEncoderModel.from_pretrained(
+                cfg.pretrained_encoder
+            )
+            encoder_config = pretrained_encoder.config
+            return encoder_config, pretrained_encoder
+        else:
+            encoder_config = ZipformerConfig()
+            return encoder_config, None
+    else:
+        raise ValueError(f"Unsupported encoder model type: {cfg.get('model_type')}")
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="train")
@@ -83,17 +102,16 @@ def main(cfg: DictConfig):
         os.makedirs(cfg.exp_dir, exist_ok=True)
 
     # 5) initialize model
-    # encoder can be:
-    # - a path/HF repo with config.json; or
-    # - a plain model_type string handled by AutoConfig.for_model via script logic.
-    try:
-        encoder_config = AutoConfig.from_pretrained(cfg.model.encoder)
-    except Exception:
-        # Fallback: treat as model_type key with defaults
-        encoder_config = AutoConfig.for_model(cfg.model.encoder)
+    encoder_config, pretrained_encoder = load_pretrained_encoder(cfg.model.encoder)
     config = AutoConfig.for_model(cfg.model.model_type, encoder_config=encoder_config)
     tokenizer = AutoTokenizer.from_pretrained(cfg.tokenizer)
     model = AutoModel.from_config(config, tokenizer)
+
+    if pretrained_encoder is not None:
+        model.encoder.load_state_dict(pretrained_encoder.state_dict(), strict=True)
+        logging.info(
+            f"Loaded pretrained encoder from {cfg.model.encoder.pretrained_encoder}"
+        )
 
     if rank == 0:
         config.save_pretrained(cfg.exp_dir)

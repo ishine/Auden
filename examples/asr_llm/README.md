@@ -82,7 +82,7 @@ Use the Audio‑LLM model’s `generate` API for batched decoding. Input can be 
 from auden.auto.auto_model import AutoModel
 import torch
 
-model = AutoModel.from_pretrained("/pretrained/audio_llm/dir").eval()
+model = AutoModel.from_pretrained("/pretrained/lalm/dir").eval()
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model = model.to(device)
 

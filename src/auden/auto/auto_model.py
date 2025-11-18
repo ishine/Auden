@@ -24,8 +24,7 @@ MODEL_MAPPING_NAMES: "OrderedDict[str, tuple[str, str]]" = OrderedDict(
         ("audio-tag", ("auden.models.audio_tag.model", "AudioTagModel")),
         ("clap", ("auden.models.clap.model", "ClapModel")),
         ("audio-caption", ("auden.models.audio_caption.model", "AudioCaptionModel")),
-        ("audio-llm", ("auden.models.audio_llm.model", "AudioLLMModel")),
-        ("spk-veri", ("auden.models.spk_veri.model", "SpeakerVerificationModel")),
+        ("lalm", ("auden.models.lalm.model", "LalmModel")),
         ("tta", ("auden.models.tta.model", "TtaModel")),
     ]
 )
@@ -150,10 +149,10 @@ def list_available_models() -> list[str]:
 
 class AutoModel:
     """
-    Factory class for automatically loading audio models based on configuration.
+    Factory class for automatically loading audio and multimodal models based on configuration.
 
-    Supports various audio understanding tasks including ASR, audio captioning,
-    speaker verification, and more.
+    Supports various audio & multimodal understanding tasks including ASR, audio captioning,
+    speaker verification, speech-LLM, and more.
     """
 
     @classmethod

@@ -4,7 +4,7 @@ hydra:
     dir: ${exp_dir}/logs/${now:%Y-%m-%d}/${now:%H-%M-%S}  # Force Hydra output (logs, etc.) into your experiment dir
 
 model:
-  model_type: audio-llm 
+  model_type: lalm 
   audio_encoder:
     model_type: zipformer
     pretrained_model: null
@@ -15,7 +15,7 @@ model:
     use_flash_attn: False
     frozen: True
   audio_token: <|AUDIO|> 
-  encoder_projector_ds_rate: 4 # 4 * 4 = 16 for zipformer and 2 * 8 = 16 for others; i.e. 100hz fbank --> 6.25Hz LLM input token
+  audio_encoder_projector_ds_rate: 4 # 4 * 4 = 16 for zipformer and 2 * 8 = 16 for others; i.e. 100hz fbank --> 6.25Hz LLM input token
   tag_audio_boundary: False
   exclude_from_checkpoint: null
 

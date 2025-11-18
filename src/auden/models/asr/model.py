@@ -3,18 +3,25 @@ import os
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-import k2
+try:
+    import k2
+except Exception as e:
+    raise ImportError(
+        "k2 is required for RNNT/Transducer training and decoding. "
+        "Install via conda: `conda install -c k2-fsa k2` (ensure PyTorch/CUDA match), "
+        "or see https://k2-fsa.github.io/k2/ for install options."
+    ) from e
 import torch
 import torch.nn as nn
+from transformers import AutoTokenizer
 
 from ...auto.auto_config import AutoConfig
 from ...auto.auto_model import AutoModel
-from ...auto.auto_tokenizer import AutoTokenizer
 from ..zipformer.utils.scaling import ScaledLinear
 from .asr_decoder.decoder import Decoder
 from .asr_decoder.joiner import Joiner
 from .decode import greedy_search_batch
-from .utils import add_sos
+from .utils import add_sos, drop_leading_bar
 
 
 class AsrModel(nn.Module):
@@ -58,7 +65,7 @@ class AsrModel(nn.Module):
             model_dir, _ = os.path.split(model_path)
 
         config = AutoConfig.from_pretrained(model_dir)
-        tokenizer = AutoTokenizer.from_pretrained(Path(model_dir) / "tokenizer")
+        tokenizer = AutoTokenizer.from_pretrained(Path(model_dir))
         model = cls(config, tokenizer)
 
         ext = os.path.splitext(weight_path)[1].lower()
@@ -86,7 +93,7 @@ class AsrModel(nn.Module):
         super().__init__()
         self.config = config
         self.tokenizer = tokenizer
-        self.blank_id = self.tokenizer.blank_id
+        self.blank_id = self.tokenizer.pad_token_id
         self.vocab_size = self.tokenizer.vocab_size
         self.encoder_out_dim = max(config.encoder_config.encoder_dim)
         self.encoder = AutoModel.from_config(self.config.encoder_config)
@@ -148,6 +155,7 @@ class AsrModel(nn.Module):
         ctc_loss = torch.nn.functional.ctc_loss(
             log_probs=ctc_output.permute(1, 0, 2),  # (T, N, C)
             targets=targets.cpu(),
+            blank=self.blank_id,
             input_lengths=encoder_out_lens.cpu(),
             target_lengths=target_lengths.cpu(),
             reduction="sum",
@@ -209,7 +217,7 @@ class AsrModel(nn.Module):
         lm = self.simple_lm_proj(decoder_out)
         am = self.simple_am_proj(encoder_out)
 
-        with torch.cuda.amp.autocast(enabled=False):
+        with torch.amp.autocast("cuda", enabled=False):
             simple_loss, (px_grad, py_grad) = k2.rnnt_loss_smoothed(
                 lm=lm.float(),
                 am=am.float(),
@@ -244,7 +252,7 @@ class AsrModel(nn.Module):
         # prior to do_rnnt_pruning (this is an optimization for speed).
         logits = self.joiner(am_pruned, lm_pruned, project_input=False)
 
-        with torch.cuda.amp.autocast(enabled=False):
+        with torch.amp.autocast("cuda", enabled=False):
             pruned_loss = k2.rnnt_loss_pruned(
                 logits=logits.float(),
                 symbols=y_padded,
@@ -263,6 +271,7 @@ class AsrModel(nn.Module):
         prune_range: int = 5,
         am_scale: float = 0.0,
         lm_scale: float = 0.0,
+        should_drop_leading_bar: bool = True,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Args:
@@ -292,7 +301,9 @@ class AsrModel(nn.Module):
               lm_scale * lm_probs + am_scale * am_probs +
               (1-lm_scale-am_scale) * combined_probs
         """
-        y_list = self.tokenizer.encode(texts)
+        y_list = self.tokenizer(texts)
+        if should_drop_leading_bar:
+            y_list = drop_leading_bar(y_list)
         device = x.device
         y = k2.RaggedTensor(y_list).to(device)
         assert x.ndim == 3, x.shape
@@ -357,5 +368,5 @@ class AsrModel(nn.Module):
             raise NotImplementedError(
                 f"Decoding method '{decoding_method}' is not supported"
             )
-        hyps = self.tokenizer.decode(hyp_tokens)
+        hyps = self.tokenizer.batch_decode(hyp_tokens, skip_special_tokens=True)
         return hyps
