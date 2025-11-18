@@ -173,12 +173,12 @@ def conversation(audio_path, sys_prompt_active, temperature, user_text, chat_mes
     # Build the **new turn only** for the model (PKV holds prior context)
     new_messages = []
     if not sys_prompt_active:
-        sys_prompt_active = """
-            你是由腾讯AILAB研发的语音助手，请根据用户的音频或文本输入，决定回复的语气和风格，并以'|eop|'作为分隔符，按照以下格式输出： 
-            <语气和风格><|eop|><回复内容>。其中<语气和风格>只能从这个列表中选择: 
-            [正常, 高兴, 悲伤, 惊讶, 愤怒, 恐惧, 厌恶, 冷静, 严肃, 快速, 非常快速, 慢速, 非常慢速, 粤语, 四川话, 上海话, 郑州话, 长沙话, 天津话，神秘, 凶猛, 好奇, 优雅, 孤独, 机器人, 小猪佩奇]。
-            例如：'愤怒|eop|我不愿意做奴隶'
-        """
+        sys_prompt_active = (
+            "你是由腾讯AILAB研发的语音助手，请根据用户的音频或文本输入，决定回复的语气和风格，并以'|eop|'作为分隔符，按照以下格式输出："
+            "<语气和风格><|eop|><回复内容>。其中<语气和风格>只能从这个列表中选择："
+            "[正常, 高兴, 悲伤, 惊讶, 愤怒, 恐惧, 厌恶, 冷静, 严肃, 快速, 非常快速, 慢速, 非常慢速, 粤语, 四川话, 上海话, 郑州话, 长沙话, 天津话，神秘, 凶猛, 好奇, 优雅, 孤独, 机器人, 小猪佩奇]。"
+            "例如：'愤怒|eop|我不愿意做奴隶'"
+        )
     if kv_state_dict.get("past") is None and sys_prompt_active:
         new_messages.append({"role": "system", "content": sys_prompt_active}) 
     if audio_path:
