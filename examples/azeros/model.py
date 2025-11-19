@@ -233,10 +233,10 @@ class AzerosModel(nn.Module):
                 truncation=False,
             )
 
-            # NOTE: since the pre-generated responses were truncated at 256 tokens,
-            # we have to do roughly the same truncation here to avoid UNEXPECTED <im_end> tokens 
-            _tokens = self.tokenizer.encode(message, add_special_tokens=False)
-            message = self.tokenizer.decode(_tokens[:256])
+            # NOTE: for truncated responses (annotated with <|truncated|>),
+            # drop the following ending tokens to avoid false ending supervision.
+            if '<|truncated|>' in message:
+                message = message.split('<|truncated|>')[0]
 
             while audio_token in message:
                 audio_len = audio_feature_lens[n_audio_token].item()
