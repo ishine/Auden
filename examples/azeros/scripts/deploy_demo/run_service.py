@@ -3,16 +3,12 @@ from __future__ import annotations
 import os
 from typing import Tuple, Optional, Union, Generator
 
-from cosyvoice.cli.cosyvoice import CosyVoice2
-from cosyvoice.utils.file_utils import load_wav
-
 import torch
 import librosa
 import numpy as np
 import gradio as gr
 import soundfile as sf
-from auden.auto.auto_model import AutoModel
-
+from model import AzerosModel
 
 TITLE = "AZeroS WebUI (Mic + WAV)"
 DESC = """
@@ -26,12 +22,30 @@ CHAT_TEMPLATE = """{% for message in messages -%}
 <|im_start|>assistant
 {% endif -%}
 """
+SYSTEM_BUILTIN = ''
 
 
 class ModelService:
     def __init__(self, args):
-        self.tts_model = CosyVoice2(args.cosyvoice_path, load_jit=False, load_trt=False, load_vllm=False, fp16=False)
-        self.speech_llm = AutoModel.from_pretrained(args.model_path, strict=False)
+        if args.enable_tts:
+            from cosyvoice.cli.cosyvoice import CosyVoice2
+            from cosyvoice.utils.file_utils import load_wav
+
+            self.prompt_speech_16k = load_wav(args.zeroshot_prompt, 16000)
+            self.tts_model = CosyVoice2(args.cosyvoice_path, load_jit=False, load_trt=False, load_vllm=False, fp16=False)
+            self.out_sr = self.tts_model.sample_rate
+
+            global SYSTEM_BUILTIN
+            SYSTEM_BUILTIN += (
+                "You are a helpful voice assistant created by Tencent AI Lab. "
+                "Please reply to speech and text inputs from users, and decide your speaking tone and style accrodingly. "
+                "Always reply with the format of '<SPEAKING TONE AND STYLE><|EOP|><RESPONSE CONTENT>', "
+                "where the '|EOP|' is a fixed separator, and the <SPEAKING TONE AND STYLE> should only be chosen from the following list: "
+                "[正常, 高兴, 悲伤, 惊讶, 愤怒, 恐惧, 厌恶, 冷静, 严肃, 快速, 非常快速, 慢速, 非常慢速, 粤语, 四川话, 上海话, 郑州话, 长沙话, 天津话，神秘, 凶猛, 好奇, 优雅, 孤独, 机器人, 小猪佩奇]. "
+                "e.g. '愤怒|EOP|Everyone has the right to enjoy freedom.'"
+            )
+
+        self.speech_llm = AzerosModel.from_pretrained(args.model_path, strict=False)
         self.device = torch.device("cuda", 0) if torch.cuda.is_available() else torch.device("cpu")
         self.audio_token_wrapped = self.speech_llm.audio_token_wrapped
         self.audio_sr = 16000
@@ -47,8 +61,6 @@ class ModelService:
             "top_p": None,
             "top_k": None,
         }
-        self.prompt_speech_16k = load_wav(args.zeroshot_prompt, 16000)
-        self.out_sr = self.tts_model.sample_rate
 
     def load_audio_mono(self, path: str, target_sr: int = 16000) -> Tuple[np.ndarray, int]:
         """
@@ -87,7 +99,7 @@ class ModelService:
             x = x.to(self.device)
             x_lens = x_lens.to(self.device)
             audio_features, feature_lens = self.speech_llm.forward_audio_features(x, x_lens)
-            _, inputs_embeds, _, _ = self.speech_llm.preprocess_text_and_audio(
+            _, inputs_embeds, _, _, _ = self.speech_llm.preprocess_text_and_audio(
                 [messages],
                 audio_features=audio_features,
                 audio_feature_lens=feature_lens,
@@ -128,22 +140,24 @@ class ModelService:
         past_key_values_new = getattr(outputs, "past_key_values", None)
         output_embeds = self.speech_llm.llm.get_input_embeddings()(sequences)
         inputs_embeds = torch.cat((inputs_embeds, output_embeds), dim=1)
-        print('=> [Response]', response)
-        try:
-            instruct, content = response[0].split("|eop|")
-        except:
-            instruct = "正常"
-            content = response[0]
-        gen = self.tts_model.inference_instruct2(
-            content, instruct, self.prompt_speech_16k, stream=False
-        )
-        chunks = []
-        for out in gen:
-            x = out["tts_speech"]                    # [T] 或 [1, T]
-            x = x.squeeze(0) if isinstance(x, torch.Tensor) and x.ndim == 2 else x
-            x = torch.as_tensor(x).detach().cpu().float()
-            chunks.append(x)
-        out_speech = torch.cat(chunks, dim=-1)           # [T]
+        content = response[0]
+        print('=> [Response]', content)
+        out_speech = None
+        if hasattr(self, 'tts_model'):
+            try:
+                instruct, content = content.split("|EOP|")
+            except:
+                instruct = "正常"
+            gen = self.tts_model.inference_instruct2(
+                content, instruct, self.prompt_speech_16k, stream=False
+            )
+            chunks = []
+            for out in gen:
+                x = out["tts_speech"]                    # [T] 或 [1, T]
+                x = x.squeeze(0) if isinstance(x, torch.Tensor) and x.ndim == 2 else x
+                x = torch.as_tensor(x).detach().cpu().float()
+                chunks.append(x)
+            out_speech = torch.cat(chunks, dim=-1)           # [T]
         return response, past_key_values_new, inputs_embeds, out_speech
 
 
@@ -172,13 +186,9 @@ def conversation(audio_path, sys_prompt_active, temperature, user_text, chat_mes
 
     # Build the **new turn only** for the model (PKV holds prior context)
     new_messages = []
-    if not sys_prompt_active:
-        sys_prompt_active = (
-            "你是由腾讯AILAB研发的语音助手，请根据用户的音频或文本输入，决定回复的语气和风格，并以'|eop|'作为分隔符，按照以下格式输出："
-            "<语气和风格><|eop|><回复内容>。其中<语气和风格>只能从这个列表中选择："
-            "[正常, 高兴, 悲伤, 惊讶, 愤怒, 恐惧, 厌恶, 冷静, 严肃, 快速, 非常快速, 慢速, 非常慢速, 粤语, 四川话, 上海话, 郑州话, 长沙话, 天津话，神秘, 凶猛, 好奇, 优雅, 孤独, 机器人, 小猪佩奇]。"
-            "例如：'愤怒|eop|我不愿意做奴隶'"
-        )
+    global SYSTEM_BUILTIN
+    if SYSTEM_BUILTIN:
+        sys_prompt_active = SYSTEM_BUILTIN
     if kv_state_dict.get("past") is None and sys_prompt_active:
         new_messages.append({"role": "system", "content": sys_prompt_active}) 
     if audio_path:
@@ -206,10 +216,11 @@ def conversation(audio_path, sys_prompt_active, temperature, user_text, chat_mes
     inputs_state_dict["past"] = input_out
     yield None, chat_messages, "", inputs_state_dict, kv_state_dict
     
-    audio_msg = gr.Audio(value=(service.out_sr, out_speech.numpy()), format="wav")  # <- 直接数组
-    chat_messages = chat_messages + [
-        {"role": "assistant", "content": audio_msg},
-    ]
+    if out_speech is not None:
+        audio_msg = gr.Audio(value=(service.out_sr, out_speech.numpy()), format="wav")  # <- 直接数组
+        chat_messages = chat_messages + [
+            {"role": "assistant", "content": audio_msg},
+        ]
     yield None, chat_messages, "", inputs_state_dict, kv_state_dict
 
 
@@ -335,6 +346,7 @@ if __name__ == "__main__":
     parser.add_argument("--server-name", default='0.0.0.0', type=str, help='Gradio server_name')
     parser.add_argument("--server-port", default='8080', type=int, help='Gradio server_port')
     parser.add_argument("--share", action='store_true', help='Gradio share')
+    parser.add_argument("--enable-tts", action='store_true', help='Gradio share')
     parser.add_argument("--model-path", default='exp/stage2/pretrained.pt',
                         type=str, help='Path to AZeroS model')
     parser.add_argument("--cosyvoice-path", default='myfolder/CosyVoice2-0.5B',
