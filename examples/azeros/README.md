@@ -73,10 +73,10 @@ We adopt `Self-generated Instruction(-Free) Tuning` to achieve seamless speech-t
 | Qwen2.5 | 4.66 | 4.55 | 4.62 | 62.03 | 80.00 | 99.04 | 70.14 | 84.84 | 71.57 | 82.69 |
 | Qwen2.5 (TN) | 4.61 | 4.53 | 4.56 | 63.84 | 56.30 | 98.85 | 66.11 | 74.07 | 64.51 | 77.52 |
 | **Cascaded System** | | | | | | | | | | |
-| <span style="color: #666666">Whisper+GPT-4o</span> | <span style="color: #666666">4.80</span> | <span style="color: #666666">4.47</span> | <span style="color: #666666">4.62</span> | <span style="color: #666666">75.77</span> | <span style="color: #666666">87.20</span> | <span style="color: #666666">98.27</span> | <span style="color: #666666">76.51</span> | <span style="color: #666666">92.97</span> | <span style="color: #666666">81.69</span> | <span style="color: #666666">87.80</span> |
+| Whisper+GPT-4o | 4.80 | 4.47 | 4.62 | 75.77 | 87.20 | 98.27 | 76.51 | 92.97 | 81.69 | 87.80 |
 | Whisper+Qwen2.5 | 4.64 | 4.33 | 4.21 | 58.50 | 52.85 | 98.27 | 63.99 | 78.24 | 69.00 | 76.05 |
 | **End-to-end Speech-LLM** | | | | | | | | | | |
-| <span style="color: #666666">GPT-4o</span> | <span style="color: #666666">4.78</span> | <span style="color: #666666">4.49</span> | <span style="color: #666666">4.58</span> | <span style="color: #666666">75.50</span> | <span style="color: #666666">84.10</span> | <span style="color: #666666">98.65</span> | <span style="color: #666666">76.02</span> | <span style="color: #666666">89.23</span> | <span style="color: #666666">80.25</span> | <span style="color: #666666">86.75</span> |
+| GPT-4o | 4.78 | 4.49 | 4.58 | 75.50 | 84.10 | 98.65 | 76.02 | 89.23 | 80.25 | 86.75 |
 | Moshi | 2.01 | 1.60 | 1.30 | 15.64 | 47.40 | 44.23 | 10.12 | 25.93 | 24.04 | 29.51 |
 | Phi-4-multimodal | 3.81 | 3.82 | 3.56 | 39.78 | 61.80 | 100.00 | 45.35 | 65.93 | 42.19 | 64.32 |
 | GLM-4-Voice | 3.97 | 3.42 | 3.18 | 36.98 | 52.80 | 88.08 | 25.92 | 53.41 | 39.75 | 56.48 |
@@ -87,7 +87,7 @@ We adopt `Self-generated Instruction(-Free) Tuning` to achieve seamless speech-t
 | **AZeroS (ours)** | 4.44 | 4.18 | 3.91 | 60.22 | 56.30 | 98.65 | 61.29 | 72.09 | 59.01 | **73.13** |
 
 **Highlights:**
-- AZeroS achieves *state-of-the-art* performance on semantic tasks, compared to other systems with similar model size, with fully opensource data.
+- AZeroS achieves *state-of-the-art* performance on semantic tasks with only opensource data, compared to other systems with similar model size.
 - AZeroS demonstrates the effectiveness of the `Self-generated Instruction-Free Tuning` method with nearly no drop on generalization abilities.
 
 
@@ -96,11 +96,11 @@ We adopt `Self-generated Instruction(-Free) Tuning` to achieve seamless speech-t
 | Model | Gender | Emotion | Age | LID | Entity | Intent | Avg | Chat |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Cascaded System** | | | | | | | | |
-| <span style="color: #666666">Whisper+GPT-4o</span> | <span style="color: #666666">21.90</span> | <span style="color: #666666">59.50</span> | <span style="color: #666666">41.10</span> | <span style="color: #666666">96.80</span> | <span style="color: #666666">69.80</span> | <span style="color: #666666">87.70</span> | <span style="color: #666666">62.80</span> | <span style="color: #666666">7.54</span> |
+| Whisper+GPT-4o | 21.90 | 59.50 | 41.10 | 96.80 | 69.80 | 87.70 | 62.80 | 7.54 |
 | Whisper+Qwen2.5 | 28.36 | 50.80 | 36.40 | 88.00 | 73.60 | 82.70 | 59.98 | 7.34 |
 | **End-to-end Speech-LLM** | | | | | | | | |
-| <span style="color: #666666">GPT-4o</span> | <span style="color: #666666">*</span> | <span style="color: #666666">49.10</span> | <span style="color: #666666">*</span> | <span style="color: #666666">76.00</span> | <span style="color: #666666">61.60</span> | <span style="color: #666666">85.80</span> | <span style="color: #666666">*</span> | <span style="color: #666666">7.53</span> |
-| <span style="color: #666666">Gemini2.5-pro</span> | <span style="color: #666666">90.70</span> | <span style="color: #666666">60.70</span> | <span style="color: #666666">34.10</span> | <span style="color: #666666">99.10</span> | <span style="color: #666666">68.50</span> | <span style="color: #666666">92.20</span> | <span style="color: #666666">74.22</span> | <span style="color: #666666">8.52</span> |
+| GPT-4o | * | 49.10 | * | 76.00 | 61.60 | 85.80 | * | 7.53 |
+| Gemini2.5-pro | 90.70 | 60.70 | 34.10 | 99.10 | 68.50 | 92.20 | 74.22 | 8.52 |
 | SALMONN | 35.50 | 29.90 | 48.70 | 28.10 | 51.70 | 36.70 | 38.43 | 6.16 |
 | GLM-4-Voice | 23.91 | 22.95 | 18.70 | 25.40 | 27.90 | 21.10 | 23.33 | 5.53 |
 | Qwen2-Audio | 64.71 | 48.15 | 23.10 | 77.80 | 87.00 | 84.70 | 64.24 | 7.20 |
@@ -112,7 +112,7 @@ We adopt `Self-generated Instruction(-Free) Tuning` to achieve seamless speech-t
 *An additional prompt is added to ensure steady output of choices: 'Please make your choice among A/B/C/D and do not output other texts.'*
 
 **Highlights:**
-- AZeroS achieves *state-of-the-art* performance on paralinguistic tasks, compared to other systems with similar model size, with fully opensource data.
+- AZeroS achieves *state-of-the-art* performance on paralinguistic tasks with only opensource data, compared to other systems with similar model size.
 - AZeroS demonstrates the `general information alignment` with the curated rich text representation of speech.
 
 ---
