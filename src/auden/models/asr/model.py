@@ -21,7 +21,7 @@ from ..zipformer.utils.scaling import ScaledLinear
 from .asr_decoder.decoder import Decoder
 from .asr_decoder.joiner import Joiner
 from .decode import greedy_search_batch
-from .utils import add_sos, drop_leading_bar
+from .utils import add_sos, remove_whitespace_marker
 
 
 class AsrModel(nn.Module):
@@ -94,7 +94,8 @@ class AsrModel(nn.Module):
         self.config = config
         self.tokenizer = tokenizer
         self.blank_id = self.tokenizer.pad_token_id
-        self.vocab_size = self.tokenizer.vocab_size
+        self.vocab_size = len(self.tokenizer)
+        logging.info(f"Vocab size: {self.vocab_size}")
         self.encoder_out_dim = max(config.encoder_config.encoder_dim)
         self.encoder = AutoModel.from_config(self.config.encoder_config)
         # Initialize decoder
@@ -271,7 +272,6 @@ class AsrModel(nn.Module):
         prune_range: int = 5,
         am_scale: float = 0.0,
         lm_scale: float = 0.0,
-        should_drop_leading_bar: bool = True,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Args:
@@ -301,9 +301,8 @@ class AsrModel(nn.Module):
               lm_scale * lm_probs + am_scale * am_probs +
               (1-lm_scale-am_scale) * combined_probs
         """
-        y_list = self.tokenizer(texts)
-        if should_drop_leading_bar:
-            y_list = drop_leading_bar(y_list)
+        y_list = self.tokenizer(texts)["input_ids"]
+        y_list = remove_whitespace_marker(y_list, self.tokenizer)
         device = x.device
         y = k2.RaggedTensor(y_list).to(device)
         assert x.ndim == 3, x.shape

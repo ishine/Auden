@@ -164,9 +164,25 @@ def text_normalization(
     merge_single_char: bool = False,
     remove_erhua: bool = False,
     remove_fillers: bool = False,
+    remove_in_brackets: bool = False,
+    remove_in_parenthesis: bool = False,
+    special_tokens_to_keep: List[str] = [],
 ):
-    s = re.sub(r"[<\[][^>\]]*[>\]]", "", s)  # remove words between brackets
-    s = re.sub(r"\(([^)]+?)\)", "", s)  # remove words between parenthesis
+    # Optionally remove content in <> or [] brackets, but keep any tokens
+    # explicitly listed in `special_tokens_to_keep` (e.g. "<not end>").
+    if remove_in_brackets:
+        placeholders = {}
+        if special_tokens_to_keep:
+            for i, tok in enumerate(special_tokens_to_keep):
+                ph = f"__KEEP_TOKEN_{i}__"
+                placeholders[ph] = tok
+                s = s.replace(tok, ph)
+        s = re.sub(r"[<\[][^>\]]*[>\]]", "", s)
+        if placeholders:
+            for ph, tok in placeholders.items():
+                s = s.replace(ph, tok)
+    if remove_in_parenthesis:
+        s = re.sub(r"\(([^)]+?)\)", "", s)  # remove words between parenthesis
     if remove_symbols:
         s = remove_symbols_only(s)
 

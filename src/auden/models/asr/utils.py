@@ -105,12 +105,12 @@ def add_eos(ragged: k2.RaggedTensor, eos_id: int) -> k2.RaggedTensor:
     return concat(ragged, eos_id, direction="right")
 
 
-def drop_leading_bar(ids_batch, tok):
-    "Remove leading '▁' at the beginning of the encoded sentence"
+def remove_whitespace_marker(ids_batch, tok):
+    "Remove isolated whitespace marker in the encoded sentence"
+    whitespace_marker = "▁"
+    whitespace_marker_id = tok.convert_tokens_to_ids(whitespace_marker)
     out = []
     for ids in ids_batch:
-        toks = tok.convert_ids_to_tokens(ids)
-        if toks and (toks[0] == "▁" or toks[0].startswith("▁")):
-            ids = ids[1:]
-        out.append(ids)
+        new_ids = [id for id in ids if id != whitespace_marker_id]
+        out.append(new_ids)
     return out

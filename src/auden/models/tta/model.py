@@ -22,7 +22,7 @@ from transformers import AutoTokenizer
 
 from ...auto.auto_config import AutoConfig
 from ...auto.auto_model import AutoModel
-from ..asr.utils import add_sos, drop_leading_bar
+from ..asr.utils import add_sos, remove_whitespace_marker
 from ..zipformer.utils.padding import make_pad_mask
 from ..zipformer.utils.scaling import ScaledLinear
 from .asr_decoder.attention_decoder import AttentionDecoderModel
@@ -349,7 +349,6 @@ class TtaModel(nn.Module):
         lm_scale: float = 0.0,
         forward_attention_decoder: bool = True,
         forward_s2t_alignment: bool = True,
-        should_drop_leading_bar: bool = True,
     ) -> Tuple[torch.Tensor | None, ...]:
         """Training forward supporting RNNT, attention decoder, and s2t alignment.
 
@@ -368,9 +367,8 @@ class TtaModel(nn.Module):
         encoder_out_lens = encoder_output.encoder_out_lens
 
         # RNNT branch (ASR)
-        y_list = self.asr_tokenizer(source_texts)
-        if should_drop_leading_bar:
-            y_list = drop_leading_bar(y_list)
+        y_list = self.asr_tokenizer(source_texts)["input_ids"]
+        y_list = remove_whitespace_marker(y_list, self.asr_tokenizer)
         y = k2.RaggedTensor(y_list).to(device)
         row_splits = y.shape.row_splits(1)
         y_lens = row_splits[1:] - row_splits[:-1]
@@ -387,9 +385,8 @@ class TtaModel(nn.Module):
 
         # Attention decoder branch (ASR/AST)
         if forward_attention_decoder:
-            y_target_list = self.asr_tokenizer(target_texts)
-            if should_drop_leading_bar:
-                y_target_list = drop_leading_bar(y_target_list)
+            y_target_list = self.asr_tokenizer(target_texts)["input_ids"]
+            y_target_list = remove_whitespace_marker(y_target_list, self.asr_tokenizer)
             y_target = k2.RaggedTensor(y_target_list).to(device)
             row_splits = y_target.shape.row_splits(1)
             y_target_lens = row_splits[1:] - row_splits[:-1]
