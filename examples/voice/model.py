@@ -8,14 +8,13 @@ from typing import Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from model_config import VoiceMultitaskConfig
 
 from auden.auto.auto_config import AutoConfig
 from auden.auto.auto_model import AutoModel
 from auden.models.audio_tag.model import compute_acc
 from auden.models.audio_tag.utils import load_id2label
 from auden.models.zipformer.utils.padding import make_pad_mask
-
-from model_config import VoiceMultitaskConfig
 
 
 class VoiceMultitaskModel(nn.Module):
@@ -38,10 +37,11 @@ class VoiceMultitaskModel(nn.Module):
 
         # Load config directly from saved config.json without AutoConfig registration
         import json
+
         config_path = os.path.join(model_dir, "config.json")
-        with open(config_path, 'r') as f:
+        with open(config_path, "r") as f:
             config_dict = json.load(f)
-        
+
         # Create VoiceMultitaskConfig directly from dict
         config = VoiceMultitaskConfig(**config_dict)
 
@@ -51,7 +51,9 @@ class VoiceMultitaskModel(nn.Module):
         id2label_gender = load_id2label(Path(model_dir) / "id2label_gender.json")
         id2label_age = load_id2label(Path(model_dir) / "id2label_age.json")
 
-        model = cls(config, id2label_id, id2label_emotion, id2label_gender, id2label_age)
+        model = cls(
+            config, id2label_id, id2label_emotion, id2label_gender, id2label_age
+        )
         model.load_state_dict(torch.load(model_path, map_location="cpu"), strict=True)
         return model
 
@@ -122,13 +124,6 @@ class VoiceMultitaskModel(nn.Module):
         self.criterion_gender = torch.nn.CrossEntropyLoss(reduction="sum")
         self.criterion_age = torch.nn.CrossEntropyLoss(reduction="sum")
 
-        if self.config.fuse_encoder:
-            self.encoder_fusion_weights = nn.Parameter(
-                torch.zeros(len(config.encoder_config.num_encoder_layers))
-            )
-        else:
-            self.encoder_fusion_weights = None
-
         if pretrained_modules:
             self.load_pretrained_modules(pretrained_modules)
 
@@ -160,13 +155,11 @@ class VoiceMultitaskModel(nn.Module):
             if tag_str in label2id:
                 ids.append(label2id[tag_str])
             else:
-                logging.warning(
-                    f"Unknown label '{tag_str}' for task '{task}', using 0"
-                )
+                logging.warning(f"Unknown label '{tag_str}' for task '{task}', using 0")
                 ids.append(0)
         return torch.tensor(ids, dtype=torch.long)
 
-    def forward(self, x, x_lens, tags):
+    def forward(self, x, x_lens, tags, return_dict: bool = True):
         """
         Forward pass for training.
 
@@ -185,28 +178,16 @@ class VoiceMultitaskModel(nn.Module):
 
         # Compute encoder outputs
         encoder_output = self.encoder(x, x_lens)
-
-        if self.encoder_fusion_weights is not None:
-            fusion_weights = F.softmax(self.encoder_fusion_weights, dim=0).view(
-                -1, 1, 1, 1
-            )
-            encoder_out = (encoder_output.encoder_out_full * fusion_weights).sum(dim=0)
-        else:
-            encoder_out = encoder_output.encoder_out
+        encoder_out = encoder_output["encoder_out"]
+        encoder_out_lens = encoder_output["encoder_out_lens"]
 
         # Forward all classifiers
-        logits_id = self.forward_classifier(
-            encoder_out, encoder_output.encoder_out_lens, "id"
-        )
+        logits_id = self.forward_classifier(encoder_out, encoder_out_lens, "id")
         logits_emotion = self.forward_classifier(
-            encoder_out, encoder_output.encoder_out_lens, "emotion"
+            encoder_out, encoder_out_lens, "emotion"
         )
-        logits_gender = self.forward_classifier(
-            encoder_out, encoder_output.encoder_out_lens, "gender"
-        )
-        logits_age = self.forward_classifier(
-            encoder_out, encoder_output.encoder_out_lens, "age"
-        )
+        logits_gender = self.forward_classifier(encoder_out, encoder_out_lens, "gender")
+        logits_age = self.forward_classifier(encoder_out, encoder_out_lens, "age")
 
         # Compute losses and accuracies for each task
         loss_list = []
@@ -222,7 +203,9 @@ class VoiceMultitaskModel(nn.Module):
             self.criterion_age,
         ]
 
-        for i, (task, criterion, logits) in enumerate(zip(tasks, criterions, logits_list)):
+        for i, (task, criterion, logits) in enumerate(
+            zip(tasks, criterions, logits_list)
+        ):
             if task in tags:
                 # Filter out missing labels, only compute loss on samples with labels
                 valid_indices = []
@@ -258,7 +241,15 @@ class VoiceMultitaskModel(nn.Module):
             top1_acc_list.append(top1_acc)
             top5_acc_list.append(top5_acc)
 
-        return loss_list, logits_list, top1_acc_list, top5_acc_list
+        if return_dict:
+            return {
+                "loss_list": loss_list,
+                "logits_list": logits_list,
+                "top1_acc_list": top1_acc_list,
+                "top5_acc_list": top5_acc_list,
+            }
+        else:
+            return loss_list, logits_list, top1_acc_list, top5_acc_list
 
     def forward_classifier(self, encoder_out, encoder_out_lens, task):
         """
@@ -314,7 +305,7 @@ class VoiceMultitaskModel(nn.Module):
                 "If you wish to do speaker verification (open-set), "
                 "directly use the encoder to compare embedding distance/similarity."
             )
-        
+
         # Handle flexible input
         if isinstance(input, tuple) and len(input) == 2:
             x, x_lens = input
@@ -327,17 +318,12 @@ class VoiceMultitaskModel(nn.Module):
 
         # Forward encoder
         encoder_output = self.encoder(x, x_lens)
-        if self.encoder_fusion_weights is not None:
-            fusion_weights = F.softmax(self.encoder_fusion_weights, dim=0).view(
-                -1, 1, 1, 1
-            )
-            encoder_out = (encoder_output.encoder_out_full * fusion_weights).sum(dim=0)
-        else:
-            encoder_out = encoder_output.encoder_out
+        encoder_out = encoder_output["encoder_out"]
+        encoder_out_lens = encoder_output["encoder_out_lens"]
 
         # Forward specific classifier
         logits_full = self.forward_classifier(
-            encoder_out, encoder_output.encoder_out_lens, task
+            encoder_out, encoder_out_lens, task
         )  # (N, num_classes)
 
         # Get id2label mapping for the task
@@ -363,4 +349,3 @@ class VoiceMultitaskModel(nn.Module):
             [id2label[str(idx.item())] for idx in indices] for indices in topk_indices
         ]
         return labels, topk_logits, topk_probs
-

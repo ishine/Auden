@@ -147,9 +147,9 @@ class ClapModel(nn.Module):
             L2-normalized audio embeddings of shape (B, shared_emb_dim)
         """
         output = self.audio_encoder(x, x_lens)
-        audio_feats = self.audio_proj(output.encoder_out)
+        audio_feats = self.audio_proj(output["encoder_out"])
         padding_mask = make_pad_mask(
-            output.encoder_out_lens, max_len=audio_feats.size(1)
+            output["encoder_out_lens"], max_len=audio_feats.size(1)
         ).to(audio_feats.device)
         audio_feats = audio_feats.masked_fill(padding_mask.unsqueeze(-1), 0.0)
         frame_counts = (~padding_mask).sum(dim=1).clamp(min=1).unsqueeze(-1)
@@ -173,7 +173,9 @@ class ClapModel(nn.Module):
         text_embeds = text_output[:, 0, :]  # [cls] token
         return F.normalize(self.text_proj(text_embeds), dim=-1)
 
-    def forward(self, x, x_lens, text, gather_embeddings=False):
+    def forward(
+        self, x, x_lens, text, gather_embeddings=False, return_dict: bool = True
+    ):
         """Compute contrastive loss and return embeddings for both modalities.
 
         Args:
@@ -213,7 +215,14 @@ class ClapModel(nn.Module):
             ) + torch.mean(torch.abs(text_embeds_all)) / torch.sqrt(
                 torch.sum(text_embeds_all**2)
             )
-        return loss, audio_embeds, text_embeds
+        if return_dict:
+            return {
+                "loss": loss,
+                "audio_embeds": audio_embeds,
+                "text_embeds": text_embeds,
+            }
+        else:
+            return loss, audio_embeds, text_embeds
 
     def generate(self, input, text):
         """Generate cross-modal similarities for inference/evaluation.

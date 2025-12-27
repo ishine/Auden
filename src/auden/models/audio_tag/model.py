@@ -118,13 +118,6 @@ class AudioTagModel(nn.Module):
         elif self.loss_type == "ce":
             self.criterion = torch.nn.CrossEntropyLoss(reduction="sum")
 
-        if getattr(self.config, "fuse_encoder", False):
-            self.encoder_fusion_weights = nn.Parameter(
-                torch.zeros(len(self.config.num_encoder_layers))
-            )
-        else:
-            self.encoder_fusion_weights = None
-
     def tag2multihot(self, tag_strings: List[str]) -> torch.Tensor:
         multihot = torch.zeros(
             (len(tag_strings), self.num_classes), dtype=torch.float32
@@ -135,7 +128,13 @@ class AudioTagModel(nn.Module):
                 multihot[i, int(self.label2id[tag])] = 1.0
         return multihot
 
-    def forward(self, x: torch.Tensor, x_lens: torch.Tensor, tags: List[str]):
+    def forward(
+        self,
+        x: torch.Tensor,
+        x_lens: torch.Tensor,
+        tags: List[str],
+        return_dict: bool = True,
+    ):
         """Compute classification loss and logits.
 
         Args:
@@ -152,23 +151,25 @@ class AudioTagModel(nn.Module):
 
         encoder_output = self.encoder(x, x_lens)
 
-        if self.encoder_fusion_weights is not None:
-            fusion_weights = F.softmax(self.encoder_fusion_weights, dim=0).view(
-                -1, 1, 1, 1
-            )
-            encoder_out = (encoder_output.encoder_out_full * fusion_weights).sum(dim=0)
-        else:
-            encoder_out = encoder_output.encoder_out
+        encoder_out = encoder_output["encoder_out"]
 
         logits = self.forward_classifier(
-            encoder_out=encoder_out, encoder_out_lens=encoder_output.encoder_out_lens
+            encoder_out=encoder_out, encoder_out_lens=encoder_output["encoder_out_lens"]
         )
 
         loss = self.criterion(logits, targets)
 
         top1_acc, top5_acc = compute_acc(logits, targets)
 
-        return loss, logits, top1_acc, top5_acc
+        if return_dict:
+            return {
+                "loss": loss,
+                "logits": logits,
+                "top1_acc": top1_acc,
+                "top5_acc": top5_acc,
+            }
+        else:
+            return loss, logits, top1_acc, top5_acc
 
     def forward_classifier(
         self, encoder_out: torch.Tensor, encoder_out_lens: torch.Tensor
@@ -202,16 +203,10 @@ class AudioTagModel(nn.Module):
         x = x.to(device)
         x_lens = x_lens.to(device)
         encoder_output = self.encoder(x, x_lens)
-        if self.encoder_fusion_weights is not None:
-            fusion_weights = F.softmax(self.encoder_fusion_weights, dim=0).view(
-                -1, 1, 1, 1
-            )
-            encoder_out = (encoder_output.encoder_out_full * fusion_weights).sum(dim=0)
-        else:
-            encoder_out = encoder_output.encoder_out
+        encoder_out = encoder_output["encoder_out"]
 
         logits_full = self.forward_classifier(
-            encoder_out, encoder_output.encoder_out_lens
+            encoder_out, encoder_output["encoder_out_lens"]
         )
 
         if return_full_logits:

@@ -22,14 +22,18 @@ class AsrTrainer(BaseTrainer):
         batch_size = len(texts)
 
         with torch.set_grad_enabled(is_training):
-            simple_loss, pruned_loss, ctc_loss = self.model(
+            outputs = self.model(
                 x=feature,
                 x_lens=feature_lens,
                 texts=texts,
                 prune_range=self.cfg.trainer.prune_range,
                 am_scale=self.cfg.trainer.am_scale,
                 lm_scale=self.cfg.trainer.lm_scale,
+                return_dict=True,
             )
+            simple_loss = outputs["simple_loss"]
+            pruned_loss = outputs["pruned_loss"]
+            ctc_loss = outputs["ctc_loss"]
 
             loss = 0.0
 

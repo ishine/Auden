@@ -349,7 +349,8 @@ class TtaModel(nn.Module):
         lm_scale: float = 0.0,
         forward_attention_decoder: bool = True,
         forward_s2t_alignment: bool = True,
-    ) -> Tuple[torch.Tensor | None, ...]:
+        return_dict: bool = True,
+    ) -> Tuple[torch.Tensor | None, ...] | dict:
         """Training forward supporting RNNT, attention decoder, and s2t alignment.
 
         - RNNT (ASR): provide `source_texts`.
@@ -363,8 +364,8 @@ class TtaModel(nn.Module):
 
         # Encoder forward
         encoder_output = self.speech_encoder(x, x_lens)
-        encoder_out = encoder_output.encoder_out
-        encoder_out_lens = encoder_output.encoder_out_lens
+        encoder_out = encoder_output["encoder_out"]
+        encoder_out_lens = encoder_output["encoder_out_lens"]
 
         # RNNT branch (ASR)
         y_list = self.asr_tokenizer(source_texts)["input_ids"]
@@ -415,12 +416,20 @@ class TtaModel(nn.Module):
         else:
             s2t_align_loss = None
 
-        return (
-            simple_loss,
-            pruned_loss,
-            attention_decoder_loss,
-            s2t_align_loss,
-        )
+        if return_dict:
+            return {
+                "simple_loss": simple_loss,
+                "pruned_loss": pruned_loss,
+                "attention_decoder_loss": attention_decoder_loss,
+                "s2t_align_loss": s2t_align_loss,
+            }
+        else:
+            return (
+                simple_loss,
+                pruned_loss,
+                attention_decoder_loss,
+                s2t_align_loss,
+            )
 
     def _compute_audio_embedding(
         self, encoder_out: torch.Tensor, encoder_out_lens: torch.Tensor
@@ -492,7 +501,9 @@ class TtaModel(nn.Module):
             x, x_lens = input
         else:
             x, x_lens = self.speech_encoder.extract_feature(input)
-        output = self.speech_encoder(x, x_lens)
+        encoder_output = self.speech_encoder(x, x_lens)
+        encoder_out = encoder_output["encoder_out"]
+        encoder_out_lens = encoder_output["encoder_out_lens"]
 
         if task == "transcribe":
             # RNNT greedy search
@@ -500,8 +511,8 @@ class TtaModel(nn.Module):
 
             decoding_results = greedy_search_batch(
                 model=self,
-                encoder_out=output.encoder_out,
-                encoder_out_lens=output.encoder_out_lens,
+                encoder_out=encoder_out,
+                encoder_out_lens=encoder_out_lens,
                 blank_penalty=blank_penalty,
                 return_timestamps=return_timestamps,
             )
@@ -514,7 +525,7 @@ class TtaModel(nn.Module):
 
         if task == "translate":
             # Attention decoder beam search
-            batch_size = output.encoder_out.size(0)
+            batch_size = encoder_out.size(0)
 
             def _lang_tags_to_ids(tags: List[str] | None) -> List[int] | None:
                 if tags is None:
@@ -539,8 +550,8 @@ class TtaModel(nn.Module):
 
             decoding_results = attention_beam_search(
                 model=self,
-                encoder_out=output.encoder_out,
-                encoder_out_lens=output.encoder_out_lens,
+                encoder_out=encoder_out,
+                encoder_out_lens=encoder_out_lens,
                 source_language=src_lang_ids,
                 target_language=tgt_lang_ids,
                 beam_size=beam_size,
@@ -564,9 +575,7 @@ class TtaModel(nn.Module):
                 texts is not None and len(texts) > 0
             ), "texts must be provided for align."
             # Compute pooled audio emb and text emb
-            audio_emb = self._compute_audio_embedding(
-                output.encoder_out, output.encoder_out_lens
-            )
+            audio_emb = self._compute_audio_embedding(encoder_out, encoder_out_lens)
             text_emb = self._compute_text_embedding(texts)
             # cosine similarity as dot product because both are normalized
             sims = audio_emb @ text_emb.T  # (N, M)

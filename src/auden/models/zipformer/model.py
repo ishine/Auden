@@ -9,7 +9,6 @@ from ...auto.auto_config import AutoConfig
 from ...auto.auto_model import AutoModel
 from .features import construct_feature_extractor as _construct_fbank
 from .features import extract_features as _extract_features
-from .modeling_output import ZipformerEncoderOutput
 from .modules.subsampling import Conv2dSubsampling
 from .modules.zipformer import Zipformer2
 from .utils.padding import make_pad_mask
@@ -225,17 +224,16 @@ class ZipformerEncoderModel(nn.Module):
             error_msgs,
         )
 
-    def forward(self, x: torch.Tensor, x_lens: torch.Tensor) -> ZipformerEncoderOutput:
+    def forward(
+        self, x: torch.Tensor, x_lens: torch.Tensor, return_dict: bool = True
+    ) -> dict | tuple[torch.Tensor, torch.Tensor]:
         """Compute encoder outputs.
         Args:
             x: A 3-D tensor of shape (N, T, C).
             x_lens: A 1-D tensor of shape (N,), number of valid frames per sample.
-
-        Returns:
-            ZipformerEncoderOutput with fields:
-              - encoder_out: (N, T, C)
-              - encoder_out_lens: (N,)
-              - encoder_out_full: (N_blocks, N, T, C)
+            return_dict: If True, return a dict with keys
+                'encoder_out', 'encoder_out_lens', 'encoder_out_full'.
+                If False, return a tuple (encoder_out, encoder_out_lens, encoder_out_full).
         """
         x, x_lens = self.encoder_embed(x, x_lens)
         src_key_padding_mask = make_pad_mask(x_lens)
@@ -243,11 +241,18 @@ class ZipformerEncoderModel(nn.Module):
 
         outputs = self.encoder(x, x_lens, src_key_padding_mask)
 
-        return ZipformerEncoderOutput(
-            encoder_out=outputs[0].permute(1, 0, 2),  # (T, N, C) ->(N, T, C)
-            encoder_out_lens=outputs[1],
-            encoder_out_full=outputs[2].permute(0, 2, 1, 3),  # (N_blocks, N, T, C)
-        )
+        encoder_out = outputs[0].permute(1, 0, 2)  # (T, N, C) ->(N, T, C)
+        encoder_out_lens = outputs[1]
+        encoder_out_full = outputs[2].permute(0, 2, 1, 3)  # (N_blocks, N, T, C)
+
+        if return_dict:
+            return {
+                "encoder_out": encoder_out,
+                "encoder_out_lens": encoder_out_lens,
+                "encoder_out_full": encoder_out_full,
+            }
+        else:
+            return encoder_out, encoder_out_lens, encoder_out_full
 
     def save_pretrained(
         self,

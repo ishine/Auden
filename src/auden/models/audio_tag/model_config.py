@@ -4,7 +4,6 @@ from ..base.model_config import BaseConfig
 
 class AudioTagConfig(BaseConfig):
     model_type = "audio-tag"
-    fuse_encoder = False
     loss = "ce"
 
     def __init__(self, encoder_config=None, **kwargs):

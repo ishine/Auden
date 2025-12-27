@@ -272,7 +272,8 @@ class AsrModel(nn.Module):
         prune_range: int = 5,
         am_scale: float = 0.0,
         lm_scale: float = 0.0,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        return_dict: bool = True,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor] | dict:
         """
         Args:
           x:
@@ -313,8 +314,8 @@ class AsrModel(nn.Module):
 
         # Compute encoder outputs
         encoder_output = self.encoder(x, x_lens)
-        encoder_out = encoder_output.encoder_out
-        encoder_out_lens = encoder_output.encoder_out_lens
+        encoder_out = encoder_output["encoder_out"]
+        encoder_out_lens = encoder_output["encoder_out_lens"]
 
         row_splits = y.shape.row_splits(1)
         y_lens = row_splits[1:] - row_splits[:-1]
@@ -346,7 +347,14 @@ class AsrModel(nn.Module):
         else:
             ctc_loss = None
 
-        return (simple_loss, pruned_loss, ctc_loss)
+        if return_dict:
+            return {
+                "simple_loss": simple_loss,
+                "pruned_loss": pruned_loss,
+                "ctc_loss": ctc_loss,
+            }
+        else:
+            return (simple_loss, pruned_loss, ctc_loss)
 
     def generate(self, input, decoding_method="greedy_search", blank_penalty=0):
         # Handle flexible input
@@ -355,12 +363,14 @@ class AsrModel(nn.Module):
         else:
             x, x_lens = self.encoder.extract_feature(input)
 
-        output = self.encoder(x, x_lens)
+        encoder_output = self.encoder(x, x_lens)
+        encoder_out = encoder_output["encoder_out"]
+        encoder_out_lens = encoder_output["encoder_out_lens"]
         if decoding_method == "greedy_search":
             hyp_tokens = greedy_search_batch(
                 model=self,
-                encoder_out=output.encoder_out,
-                encoder_out_lens=output.encoder_out_lens,
+                encoder_out=encoder_out,
+                encoder_out_lens=encoder_out_lens,
                 blank_penalty=blank_penalty,
             )
         else:

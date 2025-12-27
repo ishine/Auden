@@ -61,11 +61,16 @@ class VoiceTrainer(BaseTrainer):
         }
 
         with torch.set_grad_enabled(is_training):
-            loss_list, logits_list, top1_acc_list, top5_acc_list = self.model(
+            outputs = self.model(
                 x=feature,
                 x_lens=feature_lens,
                 tags=tags,
+                return_dict=True,
             )
+            loss_list = outputs["loss_list"]
+            logits_list = outputs["logits_list"]
+            top1_acc_list = outputs["top1_acc_list"]
+            top5_acc_list = outputs["top5_acc_list"]
 
             # Combine losses with weights
             weighted_loss = 0.0
@@ -83,16 +88,22 @@ class VoiceTrainer(BaseTrainer):
         info.set_value("frames", num_frames, normalization="sum")
         info.set_value("samples", num_samples, normalization="sum")
         info.set_value(
-            "loss", total_loss.detach().cpu().item() / num_samples, normalization="sample_avg"
+            "loss",
+            total_loss.detach().cpu().item() / num_samples,
+            normalization="sample_avg",
         )
 
         # Log individual task losses and accuracies
         for i, task in enumerate(task_names):
             loss_val = loss_list[i].detach().cpu().item() / num_samples
             info.set_value(f"loss_{task}", loss_val, normalization="sample_avg")
-            info.set_value(f"top1_acc_{task}", top1_acc_list[i], normalization="sample_avg")
+            info.set_value(
+                f"top1_acc_{task}", top1_acc_list[i], normalization="sample_avg"
+            )
             if i == 0:  # Only speaker ID has top5 accuracy
-                info.set_value(f"top5_acc_{task}", top5_acc_list[i], normalization="sample_avg")
+                info.set_value(
+                    f"top5_acc_{task}", top5_acc_list[i], normalization="sample_avg"
+                )
 
         if not return_logits:
             return total_loss, info
@@ -130,4 +141,3 @@ class VoiceTrainer(BaseTrainer):
                         )
 
         self.model.train()
-

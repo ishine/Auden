@@ -125,7 +125,7 @@ for audio_file in audio_files:
     
     with torch.no_grad():
         encoder_output = encoder(x, x_lens)
-        frame_embeddings = encoder_output.encoder_out  # [B, T, D]
+        frame_embeddings = encoder_output["encoder_out"]  # [B, T, D]
         
         ## Below: Optionally for Speaker Verification
         # Global average pooling

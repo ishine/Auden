@@ -148,8 +148,8 @@ encoder = encoder.to("cuda")
 x, x_lens = ...  # Tensor shapes: (B, T, F), (B,)
 
 encoder_output = encoder(x, x_lens)
-print(encoder_output.encoder_out) # (B, T//4, D)
-print(encoder_output.encoder_out_lens) # (B)
+print(encoder_output["encoder_out"]) # (B, T//4, D)
+print(encoder_output["encoder_out_lens"]) # (B)
 
 ```
 

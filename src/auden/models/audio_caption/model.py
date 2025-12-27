@@ -200,9 +200,9 @@ class AudioCaptionModel(nn.Module):
 
     def encode_audio(self, x, x_lens):
         outputs = self.audio_encoder(x, x_lens)
-        encoder_out = outputs.encoder_out  # [B, S, D]
+        encoder_out = outputs["encoder_out"]  # [B, S, D]
         padding_mask = make_pad_mask(
-            outputs.encoder_out_lens, max_len=encoder_out.size(1)
+            outputs["encoder_out_lens"], max_len=encoder_out.size(1)
         ).to(encoder_out.device)
         return encoder_out, padding_mask
 
@@ -213,6 +213,7 @@ class AudioCaptionModel(nn.Module):
         text: Optional[List[str]] = None,
         parallel_decoding_prob: float = 0.0,
         max_length: int = 128,
+        return_dict: bool = True,
     ):
         device = next(self.parameters()).device
         x = x.to(device)
@@ -238,7 +239,10 @@ class AudioCaptionModel(nn.Module):
         )
         logits = self.text_decoder.output_proj(decoder_out)
         loss = self.criterion(logits.view(-1, self.vocab_size), tgt_out.view(-1))
-        return loss
+        if return_dict:
+            return {"loss": loss}
+        else:
+            return loss
 
     def _tokenise(self, text: List[str], *, max_length: int = 128):
         ids = self.tokenizer(

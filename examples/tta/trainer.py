@@ -35,7 +35,7 @@ class TtaTrainer(BaseTrainer):
             forward_s2t_alignment = True
 
         with torch.set_grad_enabled(is_training):
-            simple_loss, pruned_loss, attention_loss, s2t_align_loss = self.model(
+            outputs = self.model(
                 x=feature,
                 x_lens=feature_lens,
                 source_texts=source_texts,
@@ -47,7 +47,12 @@ class TtaTrainer(BaseTrainer):
                 lm_scale=self.cfg.trainer.lm_scale,
                 forward_attention_decoder=forward_attention_decoder,
                 forward_s2t_alignment=forward_s2t_alignment,
+                return_dict=True,
             )
+            simple_loss = outputs["simple_loss"]
+            pruned_loss = outputs["pruned_loss"]
+            attention_loss = outputs["attention_decoder_loss"]
+            s2t_align_loss = outputs["s2t_align_loss"]
 
             loss = 0.0
 

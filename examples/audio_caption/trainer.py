@@ -25,7 +25,7 @@ class AudioCaptionTrainer(BaseTrainer):
         batch_size = len(text)
         with torch.set_grad_enabled(is_training):
             # The audio-caption model should return cross-entropy (or similar) loss
-            loss = self.model(
+            outputs = self.model(
                 x=feature,
                 x_lens=feature_lens,
                 text=text,
@@ -33,7 +33,9 @@ class AudioCaptionTrainer(BaseTrainer):
                     self.cfg.trainer.parallel_decoding_prob if is_training else 0.0
                 ),
                 max_length=self.cfg.trainer.max_length,
+                return_dict=True,
             )
+            loss = outputs["loss"]
 
         assert loss.requires_grad == is_training
 

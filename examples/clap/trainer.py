@@ -28,7 +28,7 @@ class ClapTrainer(BaseTrainer):
         batch_size = len(text)
 
         with torch.set_grad_enabled(is_training):
-            loss, audio_embed, text_embed = self.model(
+            outputs = self.model(
                 x=feature,
                 x_lens=feature_lens,
                 text=text,
@@ -37,7 +37,11 @@ class ClapTrainer(BaseTrainer):
                     if is_training
                     else False
                 ),
+                return_dict=True,
             )
+            loss = outputs["loss"]
+            audio_embed = outputs["audio_embeds"]
+            text_embed = outputs["text_embeds"]
 
         assert loss.requires_grad == is_training
 

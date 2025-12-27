@@ -24,7 +24,11 @@ class AudioTagTrainer(BaseTrainer):
         batch_size = len(tags)
 
         with torch.set_grad_enabled(is_training):
-            loss, logits, top1, top5 = self.model(feature, feature_lens, tags)
+            outputs = self.model(feature, feature_lens, tags, return_dict=True)
+            loss = outputs["loss"]
+            logits = outputs["logits"]
+            top1 = outputs["top1_acc"]
+            top5 = outputs["top5_acc"]
 
         assert loss.requires_grad == is_training
 

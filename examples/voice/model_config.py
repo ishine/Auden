@@ -1,7 +1,7 @@
 """Configuration for voice multitask model."""
 
-from auden.models.base.model_config import BaseConfig
 from auden.auto.auto_config import AutoConfig
+from auden.models.base.model_config import BaseConfig
 
 
 class VoiceMultitaskConfig(BaseConfig):
@@ -14,7 +14,6 @@ class VoiceMultitaskConfig(BaseConfig):
     """
 
     model_type = "voice-multitask"
-    fuse_encoder = False
 
     def __init__(self, encoder_config=None, **kwargs):
         if encoder_config is None:
@@ -25,4 +24,3 @@ class VoiceMultitaskConfig(BaseConfig):
 
         self.encoder_config = encoder_config
         super().__init__(**kwargs)
-
