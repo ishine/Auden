@@ -32,7 +32,7 @@ from typing import Any, Dict, List, Optional, Union
 import torch
 from lhotse.dataset.sampling.base import CutSampler
 from torch import Tensor, nn
-from torch.amp import GradScaler  # PyTorch 2.x
+from torch.amp import GradScaler
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import Optimizer
 
@@ -178,7 +178,9 @@ def save_trainer_checkpoint(
         "optimizer": optimizer.state_dict() if optimizer else None,
         "scheduler": scheduler.state_dict() if scheduler else None,
         "grad_scaler": scaler.state_dict() if scaler else None,
-        "sampler": sampler.state_dict() if sampler else None,
+        "sampler": (
+            sampler.state_dict() if sampler and sampler.constraint is None else None
+        ),
         "batch_idx_train": batch_idx_train,
     }
 

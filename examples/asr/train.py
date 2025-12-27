@@ -115,7 +115,7 @@ def main(cfg: DictConfig):
 
     if rank == 0:
         config.save_pretrained(cfg.exp_dir)
-        tokenizer.save_pretrained(os.path.join(cfg.exp_dir, "tokenizer"))
+        tokenizer.save_pretrained(cfg.exp_dir)
 
     # 6) initialize data module
     data_module = AsrDatamodule(cfg.data)

@@ -168,19 +168,22 @@ def text_normalization(
     remove_in_parenthesis: bool = False,
     special_tokens_to_keep: List[str] = [],
 ):
-    # Optionally remove content in <> or [] brackets, but keep any tokens
-    # explicitly listed in `special_tokens_to_keep` (e.g. "<not end>").
+    # Protect special tokens (e.g. "<not end>") from all normalization steps
+    # by temporarily replacing them with placeholders, then restoring them.
+    # Use private-use Unicode code points as placeholders. They:
+    # - are very unlikely to appear in real text;
+    # - are not affected by case conversion or symbol-removal (category "Co").
+    placeholders = {}
+    if special_tokens_to_keep:
+        base_cp = 0xE000  # start of BMP private-use area
+        for i, tok in enumerate(special_tokens_to_keep):
+            ph = chr(base_cp + i)
+            placeholders[ph] = tok
+            s = s.replace(tok, ph)
+
+    # Optionally remove content in <> or [] brackets.
     if remove_in_brackets:
-        placeholders = {}
-        if special_tokens_to_keep:
-            for i, tok in enumerate(special_tokens_to_keep):
-                ph = f"__KEEP_TOKEN_{i}__"
-                placeholders[ph] = tok
-                s = s.replace(tok, ph)
         s = re.sub(r"[<\[][^>\]]*[>\]]", "", s)
-        if placeholders:
-            for ph, tok in placeholders.items():
-                s = s.replace(ph, tok)
     if remove_in_parenthesis:
         s = re.sub(r"\(([^)]+?)\)", "", s)  # remove words between parenthesis
     if remove_symbols:
@@ -226,6 +229,11 @@ def text_normalization(
     if remove_fillers:
         for c in FILLER_CHARS:
             s = s.replace(c, "")
+
+    # Restore protected special tokens.
+    if placeholders:
+        for ph, tok in placeholders.items():
+            s = s.replace(ph, tok)
 
     return s
 

@@ -100,6 +100,8 @@ class AsrDatamodule(BaseLhotseDatamodule):
                 space_between_cjk=False,
                 remove_diacritics=False,
                 remove_symbols=True,
+                remove_in_parenthesis=True,
+                remove_in_brackets=True,
             )
             c.supervisions[0].text = text
             return c
