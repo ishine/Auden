@@ -153,4 +153,16 @@ print(encoder_output.encoder_out_lens) # (B)
 
 ```
 
+## Citation
+
+If you use this model in your research, please cite:
+
+```bibtex
+@article{liu2025tta,
+  title={TTA: Transcribe, Translate and Alignment for Cross-lingual Speech Representation},
+  author={Liu, Wei and Li, Jiahong and Shao, Yiwen and Yu, Dong},
+  journal={arXiv preprint arXiv:2511.14410},
+  year={2025}
+}
+```
 
