@@ -30,7 +30,43 @@ python evaluate.py \
 ---
 
 ## 🔥 Release of AZeroS
-### Extended from Qwen2.5-7B-Instruct
+### 🤗 HuggingFace Checkpoint https://huggingface.co/AudenAI/azeros
+```python
+import torch
+from model import AZerosModel
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model = AZerosModel.from_pretrained("AudenAI/azeros").to(device)
+
+wav_files = ["speech1.wav", "speech2.wav", "speech3.wav"]
+messages = [
+    [
+        {
+            "role": "user",
+            "content": f"{model.audio_token_wrapped} Please analyze speech content and paralinguistic information.",
+        }
+    ]
+    for _ in wav_files
+]
+
+generate_config = {
+    "max_new_tokens": 200,
+    "num_beams": 1,
+    "do_sample": False,
+    "min_length": 1,
+    "repetition_penalty": 1.0,
+    "length_penalty": 1.0,
+    "top_p": None,
+    "top_k": None,
+    "temperature": None
+}
+
+outputs = model.generate(wav_files, messages, **generate_config)
+print(outputs)
+```
+We also provide a deployment script under `scripts/deploy_demo/`.
+
+### Model Overview
 
 <p>
   <img src="assets/azeros.png" width="60%" />
@@ -86,11 +122,6 @@ We adopt `Self-generated Instruction(-Free) Tuning` to achieve seamless speech-t
 | Qwen3-Omni-30B | 4.74 | 4.54 | 4.58 | 76.90 | 80.40 | 99.30 | 77.80 | 89.70 | 68.10 | **85.49** |
 | **AZeroS (ours)** | 4.44 | 4.18 | 3.91 | 60.22 | 56.30 | 98.65 | 61.29 | 72.09 | 59.01 | **73.13** |
 
-**Highlights:**
-- AZeroS achieves *state-of-the-art* performance on semantic tasks with only opensource data, compared to other systems with similar model size.
-- AZeroS demonstrates the effectiveness of the `Self-generated Instruction-Free Tuning` method with nearly no drop on generalization abilities.
-
-
 ### 📊 Performance: AIRBench
 
 | Model | Gender | Emotion | Age | LID | Entity | Intent | Avg | Chat |
@@ -112,7 +143,5 @@ We adopt `Self-generated Instruction(-Free) Tuning` to achieve seamless speech-t
 *An additional prompt is added to ensure steady output of choices: 'Please make your choice among A/B/C/D and do not output other texts.'*
 
 **Highlights:**
-- AZeroS achieves *state-of-the-art* performance on paralinguistic tasks with only opensource data, compared to other systems with similar model size.
-- AZeroS demonstrates the `general information alignment` with the curated rich text representation of speech.
-
----
+- AZeroS achieves *state-of-the-art* performance on both semantic and parallinguistic tasks with only opensource data, compared to other systems with similar model size.
+- AZeroS demonstrates the effectiveness of the `Self-generated Instruction-Free Tuning` method with nearly no drop on generalization abilities.
