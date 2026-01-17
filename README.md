@@ -2,6 +2,26 @@
 
 A comprehensive toolbox for audio & multimodal understanding tasks including ASR, CLAP, audio captioning, speaker identification, speech-llm and more.
 
+📖 **[Read the Tutorial](tutorials/introduction.md)** | 💡 [Examples](examples/) | 🤗 [Models](https://huggingface.co/AudenAI)
+
+## 🔥 What's New
+
+**January 2026**: Added WenetTransformer & WhisperEncoder • 📖 [Tutorial](tutorials/introduction.md) published
+
+**December 2025**
+- **AzeroS**: Speech-LLM understanding both semantics and paralinguistics (gender, age, emotion) | [examples](examples/azeros/) • [paper](https://arxiv.org/pdf/2601.06086) • 🤗 [model](https://huggingface.co/AudenAI/AzeroS)
+- **TagSpeech**: Unified E2E multi-speaker ASR and diarization with timestamps and speaker attribution | [examples](examples/tagspeech/) • [paper](https://arxiv.org/abs/2501.02665) • model coming soon
+
+**November 2025**
+- **TTA**: Multilingual transcribe, translate, and align model with cross-lingual speech retrieval | [examples](examples/tta/) • [paper](https://arxiv.org/abs/2511.14410) • 🤗 [model](https://huggingface.co/AudenAI/auden-tta-m10)
+- **Voice**: General-purpose voice encoder for speaker verification, emotion, gender, and age classification | [examples](examples/voice/) • [paper](https://arxiv.org/abs/2511.15145) • 🤗 [model](https://huggingface.co/AudenAI/auden-encoder-voice)
+
+<details>
+<summary>Previous updates</summary>
+- 🚀 Initial release with ASR, CLAP, audio captioning, audio tagging
+
+</details>
+
 ## Quick Start
 
 Before installing Auden:
@@ -22,6 +42,19 @@ Some [examples/](examples/) may have extra installation requirements. Please ref
 - 🚀 Pre-trained models&encoders with huggingface support and easy fine-tuning
 - 🔧 Modular design for custom workflows
 - 📊 Comprehensive evaluation metrics
+
+## 📖 Tutorial
+
+**New to Auden?** Check out our comprehensive tutorial to understand the design philosophy and learn how to build your own projects:
+
+👉 **[Auden Design Philosophy and Usage Guide](tutorials/introduction.md)**
+
+The tutorial covers:
+- Design principles and core architecture
+- How to use Auto* APIs for model/config loading
+- Step-by-step guide to building custom projects
+- Best practices for training, data processing, and deployment
+- Common FAQs and troubleshooting
 
 ## Usage
 
